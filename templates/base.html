@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Signals — {{ title }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        dark: {
+                            50: '#f0f0f5',
+                            100: '#d1d1e0',
+                            200: '#a3a3c2',
+                            300: '#7575a3',
+                            400: '#474785',
+                            500: '#1a1a2e',
+                            600: '#15152a',
+                            700: '#101026',
+                            800: '#0b0b1a',
+                            900: '#06060f',
+                            950: '#03030a',
+                        },
+                        signal: {
+                            buy: '#22c55e',
+                            'buy-bg': 'rgba(34, 197, 94, 0.12)',
+                            sell: '#ef4444',
+                            'sell-bg': 'rgba(239, 68, 68, 0.12)',
+                            neutral: '#6b7280',
+                            'neutral-bg': 'rgba(107, 114, 128, 0.12)',
+                        }
+                    },
+                    fontFamily: {
+                        'mono': ['JetBrains Mono', 'Fira Code', 'monospace'],
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'glow': 'glow 2s ease-in-out infinite alternate',
+                        'slide-up': 'slideUp 0.3s ease-out',
+                    },
+                    keyframes: {
+                        glow: {
+                            '0%': { boxShadow: '0 0 5px rgba(34, 197, 94, 0.2)' },
+                            '100%': { boxShadow: '0 0 20px rgba(34, 197, 94, 0.4)' },
+                        },
+                        slideUp: {
+                            '0%': { transform: 'translateY(10px)', opacity: '0' },
+                            '100%': { transform: 'translateY(0)', opacity: '1' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/custom.css">
+</head>
+<body class="bg-dark-950 text-gray-100 font-sans antialiased min-h-screen">
+    <!-- Sidebar Navigation -->
+    <div class="fixed left-0 top-0 h-full w-64 bg-dark-900 border-r border-dark-700/50 z-50">
+        <div class="p-5 border-b border-dark-700/50">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center text-white font-bold text-sm">TS</div>
+                <div>
+                    <h1 class="text-sm font-bold text-white">Trading Signals</h1>
+                    <p class="text-[10px] text-gray-500">Live Market Framework</p>
+                </div>
+            </div>
+        </div>
+
+        <nav class="p-3 space-y-1">
+            <a href="/" class="nav-link {% if active_page == 'dashboard' %}active{% endif %}">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+                <span>Dashboard</span>
+            </a>
+            <a href="/signals" class="nav-link {% if active_page == 'signals' %}active{% endif %}">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+                <span>Signals</span>
+                <span class="ml-auto text-[10px] bg-dark-700 px-2 py-0.5 rounded-full text-gray-400">LIVE</span>
+            </a>
+            <a href="/news" class="nav-link {% if active_page == 'news' %}active{% endif %}">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"/></svg>
+                <span>News Calendar</span>
+            </a>
+            <a href="/analysis" class="nav-link {% if active_page == 'analysis' %}active{% endif %}">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                <span>Cross-Asset</span>
+            </a>
+        </nav>
+
+        <div class="absolute bottom-0 left-0 right-0 p-4 border-t border-dark-700/50">
+            <div class="flex items-center gap-2 text-[10px] text-gray-600">
+                <div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                <span>System Online</span>
+                <span class="ml-auto" id="clock"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="ml-64">
+        <header class="sticky top-0 z-40 bg-dark-950/80 backdrop-blur-xl border-b border-dark-700/50">
+            <div class="px-6 py-3 flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-white">{{ title }}</h2>
+                <div class="flex items-center gap-4">
+                    <div class="flex items-center gap-2 text-xs text-gray-400">
+                        <span class="text-gray-600">Last update:</span>
+                        <span id="last-update" class="font-mono text-gray-300">—</span>
+                    </div>
+                    <button onclick="refreshAll()" class="px-3 py-1.5 text-xs bg-dark-800 hover:bg-dark-700 border border-dark-600 rounded-lg text-gray-300 transition-colors flex items-center gap-1.5">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                        Refresh
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <main class="p-6">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+    <script>
+        // Update clock
+        function updateClock() {
+            document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-US', { hour12: false });
+        }
+        updateClock();
+        setInterval(updateClock, 1000);
+    </script>
+</body>
+</html>

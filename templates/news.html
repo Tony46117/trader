@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="grid grid-cols-12 gap-6">
+    <!-- Main News Feed -->
+    <div class="col-span-8 space-y-4">
+        <div class="section-card">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-sm font-semibold text-white">Economic Calendar</h3>
+                <div class="flex items-center gap-2">
+                    <select id="currency-filter" class="text-xs bg-dark-800 border border-dark-600 rounded-lg px-3 py-1.5 text-gray-300 outline-none focus:border-blue-500/50">
+                        <option value="all">All Currencies</option>
+                        <option value="USD">USD</option>
+                        <option value="EUR">EUR</option>
+                        <option value="GBP">GBP</option>
+                    </select>
+                    <select id="impact-filter" class="text-xs bg-dark-800 border border-dark-600 rounded-lg px-3 py-1.5 text-gray-300 outline-none focus:border-blue-500/50">
+                        <option value="all">All Impact</option>
+                        <option value="High">High Only</option>
+                        <option value="Medium">Medium Only</option>
+                    </select>
+                    <button onclick="refreshNews()" class="px-3 py-1.5 text-xs bg-dark-800 hover:bg-dark-700 border border-dark-600 rounded-lg text-gray-300 transition-colors">
+                        Refresh
+                    </button>
+                </div>
+            </div>
+
+            <!-- Time filter tabs -->
+            <div class="flex gap-1 mb-4">
+                <button class="time-tab active" data-hours="24">24H</button>
+                <button class="time-tab" data-hours="48">48H</button>
+                <button class="time-tab" data-hours="72">72H</button>
+                <button class="time-tab" data-hours="168">7 Days</button>
+            </div>
+
+            <div id="news-container">
+                <div class="flex items-center justify-center py-16 text-gray-600">
+                    <svg class="animate-spin h-6 w-6 mr-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                    Loading economic calendar...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- News Sidebar -->
+    <div class="col-span-4 space-y-4">
+        <!-- Statistics -->
+        <div class="section-card">
+            <h3 class="text-sm font-semibold text-white mb-3">News Statistics</h3>
+            <div id="news-stats">
+                <div class="animate-pulse space-y-2">
+                    <div class="h-8 bg-dark-700 rounded"></div>
+                    <div class="h-8 bg-dark-700 rounded"></div>
+                    <div class="h-8 bg-dark-700 rounded"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Signal Guide -->
+        <div class="section-card">
+            <h3 class="text-sm font-semibold text-white mb-3">News Trading Guide</h3>
+            <div class="space-y-3 text-xs">
+                <div class="p-3 rounded-lg bg-dark-800/50 border-l-2 border-red-500">
+                    <div class="font-semibold text-red-400 mb-1">🔴 High Impact Events</div>
+                    <p class="text-gray-500 leading-relaxed">Expect significant volatility. Best to enter 5-10 minutes after release when initial spike settles.</p>
+                </div>
+                <div class="p-3 rounded-lg bg-dark-800/50 border-l-2 border-orange-500">
+                    <div class="font-semibold text-orange-400 mb-1">🟠 Medium Impact Events</div>
+                    <p class="text-gray-500 leading-relaxed">Moderate volatility. Good for swing trades — look for deviation from forecast.</p>
+                </div>
+                <div class="p-3 rounded-lg bg-dark-800/50 border-l-2 border-blue-500">
+                    <div class="font-semibold text-blue-400 mb-1">📊 Signal Interpretation</div>
+                    <p class="text-gray-500 leading-relaxed">"Bullish" when actual beats forecast, "Bearish" when actual misses. Use with technical confluence.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Affected Pairs Legend -->
+        <div class="section-card">
+            <h3 class="text-sm font-semibold text-white mb-3">Currency → Pair Mapping</h3>
+            <div class="space-y-1.5 text-xs">
+                <div class="flex items-center gap-2 p-1.5">
+                    <span class="w-6 h-4 rounded bg-blue-600 text-center text-[9px] leading-4 font-bold text-white">USD</span>
+                    <span class="text-gray-400">EURUSD, GBPUSD, XAUUSD, BTCUSD, ETHUSD</span>
+                </div>
+                <div class="flex items-center gap-2 p-1.5">
+                    <span class="w-6 h-4 rounded bg-orange-600 text-center text-[9px] leading-4 font-bold text-white">EUR</span>
+                    <span class="text-gray-400">EURUSD</span>
+                </div>
+                <div class="flex items-center gap-2 p-1.5">
+                    <span class="w-6 h-4 rounded bg-green-600 text-center text-[9px] leading-4 font-bold text-white">GBP</span>
+                    <span class="text-gray-400">GBPUSD</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
