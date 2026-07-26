@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="grid grid-cols-4 gap-4 mb-5" id="account-stats">
+    <div class="section-card p-4">
+        <div class="text-[9px] text-gray-500 uppercase tracking-wider">Balance</div>
+        <div class="text-xl font-bold text-white mt-1" id="acc-balance">—</div>
+    </div>
+    <div class="section-card p-4">
+        <div class="text-[9px] text-gray-500 uppercase tracking-wider">Active Trades</div>
+        <div class="text-xl font-bold text-white mt-1" id="acc-active">—</div>
+    </div>
+    <div class="section-card p-4">
+        <div class="text-[9px] text-gray-500 uppercase tracking-wider">Win Rate</div>
+        <div class="text-xl font-bold text-green-400 mt-1" id="acc-winrate">—</div>
+    </div>
+    <div class="section-card p-4">
+        <div class="text-[9px] text-gray-500 uppercase tracking-wider">Total P&L</div>
+        <div class="text-xl font-bold mt-1" id="acc-pnl">—</div>
+    </div>
+</div>
+
+<div class="grid grid-cols-12 gap-5">
+    <!-- Active Trades -->
+    <div class="col-span-12 lg:col-span-6 space-y-4">
+        <div class="section-card">
+            <h3 class="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                Active Trades
+            </h3>
+            <div id="active-trades-container">
+                <div class="flex items-center justify-center py-12 text-gray-600">
+                    <svg class="animate-spin h-5 w-5 mr-3 opacity-50" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                    <span class="text-xs">Loading trades...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Account Info -->
+    <div class="col-span-12 lg:col-span-6 space-y-4">
+        <div class="section-card">
+            <h3 class="text-sm font-bold text-white mb-3">📋 Account Info</h3>
+            <div class="space-y-2 text-xs" id="account-info-container">
+                <div class="animate-pulse space-y-2">
+                    <div class="h-6 bg-white/5 rounded"></div>
+                    <div class="h-6 bg-white/5 rounded"></div>
+                    <div class="h-6 bg-white/5 rounded"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Trade History -->
+        <div class="section-card">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-sm font-bold text-white">📋 Recent Trades</h3>
+                <span class="text-[10px] text-gray-500 font-mono" id="trade-count">—</span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs" id="trade-history-table">
+                    <thead>
+                        <tr class="text-gray-500 border-b border-white/5">
+                            <th class="text-left py-2 px-2 font-medium">Pair</th>
+                            <th class="text-center py-2 px-2 font-medium">Dir</th>
+                            <th class="text-right py-2 px-2 font-medium">Entry</th>
+                            <th class="text-right py-2 px-2 font-medium">SL</th>
+                            <th class="text-right py-2 px-2 font-medium">TP</th>
+                            <th class="text-center py-2 px-2 font-medium">R:R</th>
+                            <th class="text-center py-2 px-2 font-medium">Status</th>
+                            <th class="text-right py-2 px-2 font-medium">P&L</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trade-history-body">
+                        <tr><td colspan="8" class="text-center py-8 text-gray-600 text-xs">No trades yet</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Activity Log -->
+<div class="section-card mt-4">
+    <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-bold text-white">📝 Activity Log</h3>
+        <span class="text-[10px] text-gray-500 font-mono" id="log-count">—</span>
+    </div>
+    <div class="max-h-[400px] overflow-y-auto space-y-1" id="activity-log-container">
+        <div class="animate-pulse space-y-2">
+            <div class="h-8 bg-white/5 rounded"></div>
+            <div class="h-8 bg-white/5 rounded"></div>
+            <div class="h-8 bg-white/5 rounded"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadTradingBot() {
+    const [accountRes, activeRes, historyRes, logsRes] = await Promise.all([
+        apiFetch('/api/trading/account'),
+        apiFetch('/api/trading/trades/active'),
+        apiFetch('/api/trading/trades/history?limit=30'),
+        apiFetch('/api/trading/logs?limit=100'),
+    ]);
+
+    const account = accountRes.data || {};
+    const summary = account.summary || {};
+    const active = activeRes.data || [];
+    const history = historyRes.data || [];
+    const logs = logsRes.data || [];
+
+    // Stats
+    document.getElementById('acc-balance').innerHTML = `${(account.balance || 10000).toFixed(2)} <span class="text-sm text-gray-400">${account.currency || 'USD'}</span>`;
+    document.getElementById('acc-active').textContent = active.length;
+    document.getElementById('acc-winrate').textContent = `${summary.win_rate || 0}%`;
+    const pnlEl = document.getElementById('acc-pnl');
+    const pnl = summary.total_pnl || 0;
+    pnlEl.textContent = pnl.toFixed(4);
+    pnlEl.className = `text-xl font-bold mt-1 ${pnl >= 0 ? 'text-green-400' : 'text-red-400'}`;
+
+    // Active trades
+    const activeContainer = document.getElementById('active-trades-container');
+    if (active.length) {
+        activeContainer.innerHTML = active.map(t => `
+            <div class="p-3 rounded-lg ${t.direction === 'BUY' ? 'bg-green-500/5 border border-green-500/15' : 'bg-red-500/5 border border-red-500/15'} mb-2 fade-in">
+                <div class="flex justify-between">
+                    <span class="text-sm font-bold text-white">${t.pair}</span>
+                    ${signalBadge(t.direction)}
+                </div>
+                <div class="grid grid-cols-3 gap-2 mt-2 text-[10px]">
+                    <span class="text-gray-500">Entry: <span class="text-yellow-400 font-mono">${t.entry_price}</span></span>
+                    <span class="text-gray-500">SL: <span class="text-red-400 font-mono">${t.stop_loss}</span></span>
+                    <span class="text-gray-500">TP: <span class="text-green-400 font-mono">${t.take_profit_1}</span></span>
+                </div>
+                <div class="text-[9px] text-gray-600 mt-1">Opened: ${t.entry_time}</div>
+            </div>
+        `).join('');
+    } else {
+        activeContainer.innerHTML = '<div class="text-center py-6 text-gray-600 text-sm">No active trades</div>';
+    }
+
+    // Account info
+    const infoContainer = document.getElementById('account-info-container');
+    infoContainer.innerHTML = `
+        <div class="flex justify-between p-2 rounded bg-white/[0.02]"><span class="text-gray-500">Login ID</span><span class="text-gray-300 font-mono">${account.loginid || '—'}</span></div>
+        <div class="flex justify-between p-2 rounded bg-white/[0.02]"><span class="text-gray-500">Account Type</span><span class="text-gray-300">${account.account_type || 'demo'}</span></div>
+        <div class="flex justify-between p-2 rounded bg-white/[0.02]"><span class="text-gray-500">Total Trades</span><span class="text-gray-300">${summary.total_trades || 0}</span></div>
+        <div class="flex justify-between p-2 rounded bg-white/[0.02]"><span class="text-gray-500">Winning</span><span class="text-green-400">${summary.winning_trades || 0}</span></div>
+        <div class="flex justify-between p-2 rounded bg-white/[0.02]"><span class="text-gray-500">Losing</span><span class="text-red-400">${summary.losing_trades || 0}</span></div>
+        <div class="flex justify-between p-2 rounded bg-white/[0.02]"><span class="text-gray-500">Total Pips</span><span class="${(summary.total_pips || 0) >= 0 ? 'text-green-400' : 'text-red-400'} font-mono">${(summary.total_pips || 0).toFixed(1)}</span></div>
+    `;
+
+    // Trade history
+    document.getElementById('trade-count').textContent = `${history.length} trades`;
+    const tbody = document.getElementById('trade-history-body');
+    if (history.length) {
+        tbody.innerHTML = history.map(t => `
+            <tr class="border-b border-white/[0.03] hover:bg-white/[0.02]">
+                <td class="py-2 px-2 text-gray-300 font-semibold">${t.pair}</td>
+                <td class="py-2 px-2 text-center">${signalBadge(t.direction)}</td>
+                <td class="py-2 px-2 text-right font-mono text-yellow-400">${t.entry_price || '—'}</td>
+                <td class="py-2 px-2 text-right font-mono text-red-400">${t.stop_loss || '—'}</td>
+                <td class="py-2 px-2 text-right font-mono text-green-400">${t.take_profit_1 || '—'}</td>
+                <td class="py-2 px-2 text-center">${rrBadge(t.risk_reward)}</td>
+                <td class="py-2 px-2 text-center"><span class="px-1.5 py-0.5 rounded text-[9px] ${t.status === 'ACTIVE' ? 'bg-green-500/10 text-green-400' : 'bg-gray-500/10 text-gray-400'}">${t.status || 'PENDING'}</span></td>
+                <td class="py-2 px-2 text-right font-mono ${(t.pnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}">${t.pnl !== null && t.pnl !== undefined ? t.pnl.toFixed(6) : '—'}</td>
+            </tr>
+        `).join('');
+    }
+
+    // Activity log
+    document.getElementById('log-count').textContent = `${logs.length} entries`;
+    const logContainer = document.getElementById('activity-log-container');
+    if (logs.length) {
+        logContainer.innerHTML = logs.map(l => `
+            <div class="p-2 rounded bg-white/[0.02] text-[10px] fade-in">
+                <div class="flex items-center gap-2">
+                    <span class="text-gray-500 font-mono">${l.timestamp || ''}</span>
+                    <span class="px-1 py-0.5 rounded bg-white/5 text-gray-400 font-semibold">${l.event || ''}</span>
+                </div>
+                <div class="text-gray-400 mt-0.5">${l.message || ''}</div>
+            </div>
+        `).join('');
+    } else {
+        logContainer.innerHTML = '<div class="text-center py-4 text-gray-600">No activity yet</div>';
+    }
+}
+
+// Override refresh for this page
+const origRefresh = refreshAll;
+refreshAll = async function() {
+    if (window.location.pathname === '/trading-bot') {
+        await loadTradingBot();
+        updateLastUpdate();
+    } else {
+        if (origRefresh) await origRefresh();
+    }
+};
+
+document.addEventListener('DOMContentLoaded', function() {
+    if (window.location.pathname === '/trading-bot') {
+        loadTradingBot();
+        if (refreshInterval) clearInterval(refreshInterval);
+        refreshInterval = setInterval(loadTradingBot, 30000);
+    }
+});
+</script>
+{% endblock %}

@@ -9,6 +9,11 @@ Each pair gets signals from:
 
 Total = high-quality unified signal with entry, SL, TP and conviction scoring.
 Only outputs setups with minimum 1:2 risk-reward ratio.
+
+⛔ ONE-SIGNAL-PER-PAIR RULE:
+Each pair can have only ONE active signal at a time. New signals are
+NOT generated for a pair until the current active signal is validated
+or invalidated (SL/TP hit, cancelled, or expired).
 """
 
 import numpy as np
@@ -20,6 +25,7 @@ from engine.news_engine import get_news_signal_for_pair, get_all_news_signals
 from engine.tick_data import get_tick_signal
 from engine.cme_data import get_cme_analysis
 from engine.social_news import get_social_signal
+from engine.deriv_bot import has_active_signal, get_active_trade_for_pair
 
 # Weights for each signal component
 WEIGHTS = {
@@ -62,7 +68,37 @@ def generate_unified_signal(pair_key):
     """Generate a comprehensive unified signal for a single pair.
 
     Combines technical, news, tick, CME, and social signals into one verdict.
+
+    ⛔ ONE SIGNAL PER PAIR:
+    If there's already an active signal for this pair, returns the existing
+    trade data instead of generating a new signal. This prevents duplicate
+    signals until the current one is validated/invalidated.
     """
+    # ── Check for existing active signal (one signal per pair rule) ──
+    if has_active_signal(pair_key):
+        active_trade = get_active_trade_for_pair(pair_key)
+        return {
+            "pair": pair_key,
+            "pair_name": PAIRS.get(pair_key, {}).get("name", pair_key),
+            "active_signal": True,
+            "active_trade_id": active_trade.get("id") if active_trade else None,
+            "unified": {
+                "score": 50,
+                "direction": "NEUTRAL",
+                "verdict": f"⛔ Active signal exists for {pair_key} — waiting for validation/invalidation before new signal",
+                "confidence": "LOW",
+                "agreement": "NEUTRAL",
+            },
+            "current_price": 0,
+            "entry_price": active_trade.get("entry_price") if active_trade else None,
+            "stop_loss": active_trade.get("stop_loss") if active_trade else None,
+            "take_profit_1": active_trade.get("take_profit_1") if active_trade else None,
+            "setup_valid": False,
+            "setup_blocked_reason": "One signal per pair — wait for current trade to complete",
+            "timing": "WAITING",
+            "updated": datetime.now().strftime("%H:%M:%S"),
+        }
+
     # ── 1. Technical signal ──
     tech = generate_technical_signal(pair_key)
     if tech is None:

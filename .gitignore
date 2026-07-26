@@ -8,3 +8,5 @@ venv/
 .venv/
 *.egg-info/
 .env
+# Trade database — not checked in
+data/trades.db

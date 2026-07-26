@@ -27,6 +27,15 @@ from engine.cross_asset import get_cross_asset_analysis, get_market_regime
 from engine.tick_data import get_tick_signal
 from engine.cme_data import get_all_cme_analysis
 from engine.social_news import get_all_social_signals, get_social_signal
+from engine.deriv_bot import (
+    get_deriv_trader,
+    get_active_trades,
+    get_trade_history,
+    get_trade_logs,
+    get_account_summary,
+    has_active_signal,
+    close_trade,
+)
 
 app = Flask(__name__)
 
@@ -278,6 +287,95 @@ def api_social_all():
 @app.route("/api/social/<pair>")
 @cached(ttl=300)
 def api_social_pair(pair):
+    try:
+        pair = pair.upper()
+        data = get_social_signal(pair)
+        return jsonify({"status": "ok", "data": data})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+# ── Deriv Trading Bot Routes ──
+
+@app.route("/trading-bot")
+def trading_bot_page():
+    return render_template("trading_bot.html", title="Trading Bot", active_page="trading-bot")
+
+
+@app.route("/api/trading/account")
+def api_trading_account():
+    try:
+        trader = get_deriv_trader()
+        info = trader.get_account_info()
+        return jsonify({"status": "ok", "data": info})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+@app.route("/api/trading/trades/active")
+def api_trading_active_trades():
+    try:
+        trades = get_active_trades()
+        return jsonify({"status": "ok", "data": trades})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+@app.route("/api/trading/trades/history")
+def api_trading_trade_history():
+    try:
+        limit = request.args.get("limit", 50, type=int)
+        trades = get_trade_history(limit=limit)
+        return jsonify({"status": "ok", "data": trades})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+@app.route("/api/trading/logs")
+def api_trading_logs():
+    try:
+        trade_id = request.args.get("trade_id", type=int)
+        limit = request.args.get("limit", 100, type=int)
+        logs = get_trade_logs(trade_id=trade_id, limit=limit)
+        return jsonify({"status": "ok", "data": logs})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+@app.route("/api/trading/summary")
+def api_trading_summary():
+    try:
+        summary = get_account_summary()
+        return jsonify({"status": "ok", "data": summary})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+@app.route("/api/trading/close/<int:trade_id>", methods=["POST"])
+def api_close_trade(trade_id):
+    try:
+        data = request.get_json() or {}
+        exit_price = data.get("exit_price", 0)
+        exit_reason = data.get("exit_reason", "MANUAL")
+        close_trade(trade_id, exit_price, exit_reason)
+        return jsonify({"status": "ok", "message": f"Trade {trade_id} closed"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+# ── TradingView-style WebSocket endpoint (placeholder) ──
+
+@app.route("/api/tradingview/config")
+def api_tradingview_config():
+    """TradingView Charting Library config for indicator integration."""
+    return jsonify({
+        "supported_resolutions": ["1", "5", "15", "30", "60", "240", "1D"],
+        "supports_group_request": False,
+        "supports_marks": True,
+        "supports_timescale_marks": True,
+        "supports_time": True,
+        "name": "Trading Signals",
+    })
     try:
         pair = pair.upper()
         data = get_social_signal(pair)

@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Signals — Client</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        dark: { 50: '#f0f0f5', 100: '#d1d1e0', 200: '#a3a3c2', 300: '#7575a3', 400: '#474785', 500: '#1a1a2e', 600: '#15152a', 700: '#101026', 800: '#0b0b1a', 900: '#06060f', 950: '#03030a' },
+                        signal: { buy: '#22c55e', 'buy-bg': 'rgba(34, 197, 94, 0.12)', sell: '#ef4444', 'sell-bg': 'rgba(239, 68, 68, 0.12)', neutral: '#6b7280', 'neutral-bg': 'rgba(107, 114, 128, 0.12)' }
+                    },
+                    fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'], mono: ['JetBrains Mono', 'Fira Code', 'monospace'] },
+                    animation: { 'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite', 'fade-in': 'fadeIn 0.4s ease-out' },
+                    keyframes: { fadeIn: { '0%': { opacity: '0', transform: 'translateY(4px)' }, '100%': { opacity: '1', transform: 'translateY(0)' } } }
+                }
+            }
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', system-ui, sans-serif; background: #03030a; color: #e5e7eb; min-height: 100vh; }
+        .glass { background: linear-gradient(135deg, rgba(15,15,30,0.85), rgba(10,10,22,0.9)); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; }
+        .glass:hover { border-color: rgba(255,255,255,0.1); box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+        .nav-link { display: flex; align-items: center; gap: 0.75rem; padding: 0.625rem 0.875rem; border-radius: 10px; font-size: 0.8125rem; color: #6b7280; transition: all 0.2s; cursor: pointer; text-decoration: none; }
+        .nav-link:hover { background: rgba(255,255,255,0.04); color: #e5e7eb; }
+        .nav-link.active { background: rgba(34,197,94,0.1); color: #22c55e; font-weight: 500; }
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: rgba(10,10,22,0.5); }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+        .setup-card { background: linear-gradient(135deg, rgba(15,15,30,0.9), rgba(10,10,22,0.95)); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; padding: 1rem; transition: all 0.3s; position: relative; overflow: hidden; }
+        .setup-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, #22c55e, #16a34a); opacity: 0; transition: opacity 0.3s; }
+        .setup-card:hover { border-color: rgba(255,255,255,0.1); box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+        .setup-card:hover::before { opacity: 1; }
+        .badge-buy { background: rgba(34,197,94,0.12); color: #22c55e; border: 1px solid rgba(34,197,94,0.25); }
+        .badge-sell { background: rgba(239,68,68,0.12); color: #ef4444; border: 1px solid rgba(239,68,68,0.25); }
+        .badge-neutral { background: rgba(107,114,128,0.12); color: #9ca3af; border: 1px solid rgba(107,114,128,0.25); }
+        .impact-high { background: rgba(239,68,68,0.08); color: #fca5a5; border-left: 3px solid #ef4444; border-radius: 0 8px 8px 0; padding: 0.75rem; }
+        .skeleton { background: linear-gradient(90deg, rgba(15,15,30,0.8) 25%, rgba(255,255,255,0.04) 50%, rgba(15,15,30,0.8) 75%); background-size: 200% 100%; animation: skeleton-loading 1.5s infinite; border-radius: 8px; }
+        @keyframes skeleton-loading { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .fade-in { animation: fadeIn 0.35s cubic-bezier(0.4,0,0.2,1); }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .tab-btn { padding: 0.375rem 0.875rem; font-size: 0.75rem; background: rgba(15,15,30,0.8); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; color: #6b7280; cursor: pointer; transition: all 0.2s; }
+        .tab-btn:hover { background: rgba(255,255,255,0.04); color: #e5e7eb; }
+        .tab-btn.active { background: rgba(34,197,94,0.12); border-color: rgba(34,197,94,0.3); color: #22c55e; }
+        @media (max-width: 768px) { .sidebar { display: none; } .mobile-nav { display: flex; } }
+        @media (min-width: 769px) { .mobile-nav { display: none; } .sidebar { display: flex; } }
+    </style>
+</head>
+<body>
+    <div id="app" class="min-h-screen flex">
+        <!-- Sidebar -->
+        <aside class="sidebar fixed left-0 top-0 h-full w-[220px] flex-col z-50 glass border-r border-white/[0.04]" style="border-radius:0">
+            <div class="p-5 border-b border-white/[0.04]">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center">
+                        <span class="text-white font-bold text-sm">TS</span>
+                    </div>
+                    <div>
+                        <h1 class="text-sm font-bold text-white tracking-tight">Trading Signals</h1>
+                        <p class="text-[10px] text-gray-500 font-medium">Client v1.0</p>
+                    </div>
+                </div>
+            </div>
+            <nav class="flex-1 p-3 space-y-0.5">
+                <a class="nav-link active" data-page="dashboard" onclick="navigate('dashboard')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+                    <span>Dashboard</span>
+                </a>
+                <a class="nav-link" data-page="signals" onclick="navigate('signals')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+                    <span>Signals</span>
+                    <span class="ml-auto text-[9px] bg-green-500/10 text-green-400 px-1.5 py-0.5 rounded-full font-semibold">LIVE</span>
+                </a>
+                <a class="nav-link" data-page="trading-bot" onclick="navigate('trading-bot')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    <span>Trading Bot</span>
+                </a>
+                <a class="nav-link" data-page="news" onclick="navigate('news')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"/></svg>
+                    <span>News</span>
+                </a>
+                <a class="nav-link" data-page="analysis" onclick="navigate('analysis')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                    <span>Cross-Asset</span>
+                </a>
+                <a class="nav-link" data-page="account-log" onclick="navigate('account-log')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
+                    <span>Account Log</span>
+                </a>
+            </nav>
+            <div class="p-4 border-t border-white/[0.04]">
+                <div class="flex items-center gap-2 text-[10px] text-gray-600">
+                    <div class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
+                    <span>Connected</span>
+                    <span class="ml-auto font-mono" id="clock"></span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Mobile Nav -->
+        <nav class="mobile-nav fixed bottom-0 left-0 right-0 z-50 glass border-t border-white/[0.04] p-2 flex justify-around" style="border-radius:0">
+            <a class="nav-link active p-2 flex-col gap-0.5 text-[9px]" data-page="dashboard" onclick="navigate('dashboard')"><span>🏠</span><span>Home</span></a>
+            <a class="nav-link p-2 flex-col gap-0.5 text-[9px]" data-page="signals" onclick="navigate('signals')"><span>📊</span><span>Signals</span></a>
+            <a class="nav-link p-2 flex-col gap-0.5 text-[9px]" data-page="trading-bot" onclick="navigate('trading-bot')"><span>🤖</span><span>Bot</span></a>
+            <a class="nav-link p-2 flex-col gap-0.5 text-[9px]" data-page="account-log" onclick="navigate('account-log')"><span>📋</span><span>Log</span></a>
+        </nav>
+
+        <!-- Main Content -->
+        <div class="ml-[220px] flex-1 min-h-screen" id="main-content">
+            <header class="sticky top-0 z-40 bg-dark-950/70 backdrop-blur-xl border-b border-white/[0.04]">
+                <div class="px-6 py-3 flex items-center justify-between">
+                    <h2 class="text-base font-bold text-white" id="page-title">Dashboard</h2>
+                    <div class="flex items-center gap-4">
+                        <div class="flex items-center gap-2 text-xs text-gray-500">
+                            <span>Updated</span>
+                            <span id="last-update" class="font-mono text-gray-400">—</span>
+                        </div>
+                        <button onclick="refreshAll()" class="px-3 py-1.5 text-xs bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-gray-300 transition-all flex items-center gap-1.5">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+            </header>
+            <main class="p-6" id="page-content"></main>
+        </div>
+    </div>
+
+    <script>
+    // ── Configuration ──
+    // Change API_BASE to your Flask backend URL when deploying client separately
+    const API_BASE = window.location.origin; // Same origin, or set explicitly: 'http://localhost:5000'
+    let refreshInterval = null;
+
+    // ── Utilities ──
+    function $(id) { return document.getElementById(id); }
+    function fmtPrice(n, pair) { if (n===null||n===undefined||n===0) return '—'; const d = pair && (pair.includes('BTC')||pair.includes('ETH')||pair.includes('XAU')) ? 2 : 5; return n.toFixed(d); }
+    function fmtChange(v) { if (v===null||v===undefined) return '0.00%'; return `${v>=0?'+':''}${v.toFixed(2)}%`; }
+    function sigClass(s) { if (!s) return 'neutral'; const u=s.toUpperCase(); if (u==='BUY'||u==='BULLISH') return 'buy'; if (u==='SELL'||u==='BEARISH') return 'sell'; return 'neutral'; }
+    function sigBadge(s, t) { const c=sigClass(s); return `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold badge-${c}">${t||s||'NEUTRAL'}</span>`; }
+    function rrBadge(r) { if (r===null||r===undefined) return '<span class="text-[9px] text-gray-600">—</span>'; const n=parseFloat(r); if(n<2) return `<span class="text-[9px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 font-semibold">1:${n.toFixed(1)}</span>`; if(n>=4) return `<span class="text-[9px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 font-semibold">1:${n.toFixed(1)}</span>`; return `<span class="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-semibold">1:${n.toFixed(1)}</span>`; }
+    function ts() { return new Date().toLocaleTimeString('en-US',{hour12:false}); }
+    function updateClock() { const e=$('clock'); if(e) e.textContent=ts(); }
+
+    async function api(path) {
+        try { const r=await fetch(`${API_BASE}${path}`); return await r.json(); }
+        catch(e) { console.error(`API [${path}]:`,e); return {status:'error',message:e.message}; }
+    }
+
+    function updateTime() { const e=$('last-update'); if(e) e.textContent=ts(); }
+
+    // ── Navigation ──
+    function navigate(page) {
+        document.querySelectorAll('.nav-link[data-page]').forEach(l => l.classList.toggle('active', l.dataset.page===page));
+        const titles = { dashboard:'Dashboard', signals:'Trading Signals', 'trading-bot':'Trading Bot', news:'News Calendar', analysis:'Cross-Asset Analysis', 'account-log':'Account Log' };
+        $('page-title').textContent = titles[page] || 'Dashboard';
+        if (refreshInterval) { clearInterval(refreshInterval); refreshInterval=null; }
+        renderPage(page);
+    }
+
+    function renderPage(page) {
+        const c = $('page-content');
+        if (page==='dashboard') renderDashboard(c);
+        else if (page==='signals') renderSignals(c);
+        else if (page==='trading-bot') renderTradingBot(c);
+        else if (page==='news') renderNews(c);
+        else if (page==='analysis') renderAnalysis(c);
+        else if (page==='account-log') renderAccountLog(c);
+    }
+
+    // ── DASHBOARD ──
+    async function renderDashboard(c) {
+        c.innerHTML = `<div class="flex items-center justify-center py-20 text-gray-600"><svg class="animate-spin h-6 w-6 mr-3 opacity-50" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span class="text-sm">Loading dashboard...</span></div>`;
+
+        const [overviewRes, setupsRes, newsRes] = await Promise.all([
+            api('/api/market/overview'), api('/api/signals/setups?min_score=55&max=5'), api('/api/news/upcoming?hours=48')
+        ]);
+
+        const overview = overviewRes.data || {};
+        const setups = setupsRes.data || [];
+        const news = newsRes.data || [];
+
+        let cards = Object.keys(overview).map(p => {
+            const item = overview[p];
+            const cls = sigClass(item.direction);
+            return `<div class="glass p-4 border ${item.setup_valid ? (cls==='buy'?'border-green-500/30':'border-red-500/30') : 'border-white/[0.06]'}">
+                <div class="flex justify-between mb-2"><span class="text-xs font-bold text-gray-200">${p.slice(0,3)}/<span class="text-gray-500">${p.slice(3)}</span></span><span class="text-[9px] text-gray-600 uppercase">${item.type||''}</span></div>
+                <div class="text-xl font-bold font-mono text-white">${fmtPrice(item.price,p)}</div>
+                <div class="flex justify-between mt-2"><span class="text-[11px] font-mono ${item.change>=0?'text-green-400':'text-red-400'}">${fmtChange(item.change)}</span>${sigBadge(item.direction)}</div>
+                <div class="mt-2 pt-2 border-t border-white/5 flex justify-between text-[10px]">
+                    <span class="text-gray-600">SL <span class="font-mono text-red-400/80">${fmtPrice(item.sl,p)}</span></span>
+                    <span class="text-gray-600">TP <span class="font-mono text-green-400/80">${fmtPrice(item.tp1,p)}</span></span>
+                </div>
+                <div class="mt-1 text-right"><span class="text-[9px] text-gray-600">R:R </span>${rrBadge(item.rr1)}</div>
+            </div>`;
+        }).join('');
+
+        let setupsHtml = setups.length ? setups.map((s,i) => {
+            const cls = sigClass(s.direction);
+            return `<div class="setup-card fade-in" style="animation-delay:${i*50}ms">
+                <div class="flex justify-between">
+                    <div class="flex gap-3">
+                        <div class="w-9 h-9 rounded-xl ${cls==='buy'?'bg-green-500/15 text-green-400':'bg-red-500/15 text-red-400'} flex items-center justify-center text-sm font-bold">${s.direction==='BUY'?'↑':'↓'}</div>
+                        <div><div class="text-sm font-bold text-white">${s.pair_name||s.pair}</div><div class="text-[10px] text-gray-500 truncate max-w-[200px]">${s.verdict?.substring(0,55)||''}</div></div>
+                    </div>
+                    <div class="text-right"><div class="text-base font-bold font-mono ${cls==='buy'?'text-green-400':'text-red-400'}">${s.score}</div>${sigBadge(s.direction)}</div>
+                </div>
+                <div class="flex justify-between mt-2 pt-2 border-t border-white/[0.04]">
+                    <span class="text-[9px] text-gray-600">${s.confidence} confidence • ${s.timing}</span>${rrBadge(s.risk_reward_1)}
+                </div>
+            </div>`;
+        }).join('') : `<div class="text-center py-8 text-gray-600 text-sm">No active setups — waiting for clearer signals</div>`;
+
+        let newsHtml = news.slice(0,4).map(e => {
+            const isHigh = e.impact && (e.impact.toLowerCase().includes('high')||e.impact.toLowerCase().includes('red'));
+            return `<div class="${isHigh?'impact-high':'impact-medium'} mb-1.5 p-2.5 rounded-lg" style="border-left:3px solid ${isHigh?'#ef4444':'#f97316'}">
+                <div class="flex justify-between"><span class="text-[10px] font-bold ${isHigh?'text-red-400':'text-orange-400'}">${e.currency||''}</span><span class="text-[9px] text-gray-500 font-mono">${e.datetime?.split(' ')[1]||''}</span></div>
+                <div class="text-xs text-gray-300 mt-0.5 truncate">${e.event||''}</div>
+                <div class="flex gap-2 mt-1 text-[9px] text-gray-500"><span>F: ${e.forecast||'—'}</span><span>P: ${e.previous||'—'}</span></div>
+            </div>`;
+        }).join('') || '<div class="text-center py-4 text-gray-600 text-xs">No upcoming events</div>';
+
+        c.innerHTML = `
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">${cards}</div>
+            <div class="grid grid-cols-12 gap-5">
+                <div class="col-span-12 lg:col-span-8 space-y-4">
+                    <div class="glass p-5">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-sm font-bold text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> Active Setups <span class="text-[9px] text-gray-600 font-normal">min 1:2 RR</span></h3>
+                            <span class="text-[10px] text-gray-500 font-mono">${setups.length} active</span>
+                        </div>
+                        ${setupsHtml}
+                    </div>
+                </div>
+                <div class="col-span-12 lg:col-span-4 space-y-4">
+                    <div class="glass p-5">
+                        <h3 class="text-sm font-bold text-white mb-3 flex items-center gap-2">📰 News</h3>
+                        ${newsHtml}
+                    </div>
+                </div>
+            </div>`;
+        updateTime();
+        refreshInterval = setInterval(() => renderDashboard(c), 30000);
+    }
+
+    // ── SIGNALS ──
+    async function renderSignals(c) {
+        c.innerHTML = `<div class="flex items-center justify-center py-20 text-gray-600"><svg class="animate-spin h-6 w-6 mr-3 opacity-50" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span class="text-sm">Loading signals...</span></div>`;
+
+        const result = await api('/api/signals/unified');
+        if (result.status !== 'ok') { c.innerHTML = `<div class="text-center py-12 text-red-400">Error loading signals</div>`; return; }
+
+        const data = result.data;
+        c.innerHTML = Object.keys(data).map(pair => {
+            const sig = data[pair];
+            const u = sig.unified || {};
+            const tech = sig.technical_signal || {};
+            const news = sig.news_signal || {};
+            const tick = sig.tick_signal || {};
+            const cme = sig.cme_signal || {};
+            const social = sig.social_signal || {};
+            const comps = u.components || {};
+            const dir = sigClass(u.direction);
+            const conf = u.confidence || 'LOW';
+            const isValid = sig.setup_valid !== false;
+            const hasActive = sig.active_signal;
+
+            return `<div class="glass p-5 mb-3 fade-in" style="opacity:${isValid||hasActive?'1':'0.55'}">
+                ${hasActive ? `<div class="mb-3 p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-400"><strong>⛔ Active Signal Active</strong> — ${u.verdict||''}</div>` : ''}
+                <div class="flex justify-between mb-3">
+                    <div class="flex gap-3">
+                        <div class="w-10 h-10 rounded-xl ${dir==='buy'?'bg-green-500/15':'bg-red-500/15'} flex items-center justify-center"><span class="text-lg font-bold ${dir==='buy'?'text-green-400':'text-red-400'}">${u.direction==='BUY'?'↑':u.direction==='SELL'?'↓':'→'}</span></div>
+                        <div><h4 class="text-sm font-bold text-white">${pair.slice(0,3)}/<span class="text-gray-400">${pair.slice(3)}</span></h4><div class="flex gap-2 mt-0.5">${sigBadge(u.direction)}<span class="text-[10px] ${conf==='HIGH'?'text-green-400':conf==='MEDIUM'?'text-yellow-400':'text-gray-500'}">${conf}</span></div></div>
+                    </div>
+                    <div class="text-right"><div class="text-xl font-bold font-mono ${dir==='buy'?'text-green-400':'text-red-400'}">${u.score||50}</div><div class="text-[9px] text-gray-600">Unified</div></div>
+                </div>
+                <div class="grid grid-cols-5 gap-2 mb-3">
+                    ${['Tech','News','Tick','CME','Social'].map((l,i)=> {
+                        const scores=[comps.technical||tech.score||50, comps.news||news.score||50, comps.tick||tick.score||50, comps.cme||cme.score||50, comps.social||social.score||50];
+                        const sc=scores[i], cd=sc>=60?'buy':sc<=40?'sell':'neutral';
+                        return `<div class="text-center"><div class="text-[9px] text-gray-500 mb-1">${l}</div><div class="text-xs font-mono font-semibold ${cd==='buy'?'text-green-400':cd==='sell'?'text-red-400':'text-gray-400'}">${Math.round(sc)}</div><div class="w-full h-1 bg-white/5 rounded mt-1"><div class="h-full rounded ${cd==='buy'?'bg-green-500':'bg-red-500':'bg-gray-500'}" style="width:${sc}%"></div></div></div>`;
+                    }).join('')}
+                </div>
+                <div class="grid grid-cols-4 gap-3 p-3 rounded-xl bg-white/[0.02] border border-white/[0.04]">
+                    <div><div class="text-[9px] text-gray-600 mb-0.5">Entry</div><div class="text-xs font-mono text-yellow-400 font-bold">${fmtPrice(sig.entry_price,pair)}</div></div>
+                    <div><div class="text-[9px] text-gray-600 mb-0.5">SL</div><div class="text-xs font-mono text-red-400 font-bold">${fmtPrice(sig.stop_loss,pair)}</div></div>
+                    <div><div class="text-[9px] text-gray-600 mb-0.5">TP1</div><div class="text-xs font-mono text-green-400 font-bold">${fmtPrice(sig.take_profit_1,pair)}</div></div>
+                    <div><div class="text-[9px] text-gray-600 mb-0.5">R:R</div>${rrBadge(sig.risk_reward_1)}</div>
+                </div>
+                ${sig.cme_levels ? `<div class="flex gap-3 mt-2 text-[10px] text-gray-500"><span>Max Pain: <span class="font-mono text-gray-400">${fmtPrice(sig.cme_levels.max_pain,pair)}</span></span><span>R1: <span class="font-mono text-red-400">${fmtPrice(sig.cme_levels.primary_resistance,pair)}</span></span><span>S1: <span class="font-mono text-green-400">${fmtPrice(sig.cme_levels.primary_support,pair)}</span></span></div>` : ''}
+                <div class="mt-2 text-[11px] text-gray-500 italic">${u.verdict||''}</div>
+            </div>`;
+        }).join('');
+        updateTime();
+        refreshInterval = setInterval(() => renderSignals(c), 30000);
+    }
+
+    // ── TRADING BOT ──
+    async function renderTradingBot(c) {
+        c.innerHTML = `<div class="flex items-center justify-center py-20 text-gray-600"><svg class="animate-spin h-6 w-6 mr-3 opacity-50" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span class="text-sm">Loading trading bot...</span></div>`;
+
+        const [accountRes, activeRes, historyRes] = await Promise.all([
+            api('/api/trading/account'), api('/api/trading/trades/active'), api('/api/trading/trades/history?limit=20')
+        ]);
+
+        const account = accountRes.data || {};
+        const summary = account.summary || {};
+        const active = activeRes.data || [];
+        const history = historyRes.data || [];
+
+        c.innerHTML = `
+            <div class="grid grid-cols-4 gap-4 mb-5">
+                <div class="glass p-4"><div class="text-[9px] text-gray-500 uppercase tracking-wider">Balance</div><div class="text-xl font-bold text-white mt-1">${(account.balance||10000).toFixed(2)} <span class="text-sm text-gray-400">${account.currency||'USD'}</span></div></div>
+                <div class="glass p-4"><div class="text-[9px] text-gray-500 uppercase tracking-wider">Active Trades</div><div class="text-xl font-bold text-white mt-1">${active.length}</div></div>
+                <div class="glass p-4"><div class="text-[9px] text-gray-500 uppercase tracking-wider">Win Rate</div><div class="text-xl font-bold text-green-400 mt-1">${summary.win_rate||0}%</div></div>
+                <div class="glass p-4"><div class="text-[9px] text-gray-500 uppercase tracking-wider">Total P&L</div><div class="text-xl font-bold ${(summary.total_pnl||0)>=0?'text-green-400':'text-red-400'} mt-1">${(summary.total_pnl||0).toFixed(4)}</div></div>
+            </div>
+
+            <div class="grid grid-cols-12 gap-5">
+                <div class="col-span-12 lg:col-span-6 space-y-4">
+                    <div class="glass p-5"><h3 class="text-sm font-bold text-white mb-3 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> Active Trades</h3>
+                        ${active.length ? active.map(t => `
+                            <div class="p-3 rounded-lg ${t.direction==='BUY'?'bg-green-500/5 border border-green-500/15':'bg-red-500/5 border border-red-500/15'} mb-2">
+                                <div class="flex justify-between"><span class="text-sm font-bold text-white">${t.pair}</span>${sigBadge(t.direction)}</div>
+                                <div class="grid grid-cols-3 gap-2 mt-2 text-[10px]"><span class="text-gray-500">Entry: <span class="text-yellow-400 font-mono">${t.entry_price}</span></span><span class="text-gray-500">SL: <span class="text-red-400 font-mono">${t.stop_loss}</span></span><span class="text-gray-500">TP: <span class="text-green-400 font-mono">${t.take_profit_1}</span></span></div>
+                                <div class="text-[9px] text-gray-600 mt-1">Opened: ${t.entry_time}</div>
+                            </div>
+                        `).join('') : '<div class="text-center py-6 text-gray-600 text-sm">No active trades</div>'}
+                    </div>
+                </div>
+
+                <div class="col-span-12 lg:col-span-6 space-y-4">
+                    <div class="glass p-5"><h3 class="text-sm font-bold text-white mb-3">📋 Account Info</h3>
+                        <div class="space-y-2 text-xs">
+                            <div class="flex justify-between p-2 rounded bg-white/[0.02]"><span class="text-gray-500">Login ID</span><span class="text-gray-300 font-mono">${account.loginid||'—'}</span></div>
+                            <div class="flex justify-between p-2 rounded bg-white/[0.02]"><span class="text-gray-500">Account Type</span><span class="text-gray-300">${account.account_type||'demo'}</span></div>
+                            <div class="flex justify-between p-2 rounded bg-white/[0.02]"><span class="text-gray-500">Total Trades</span><span class="text-gray-300">${summary.total_trades||0}</span></div>
+                            <div class="flex justify-between p-2 rounded bg-white/[0.02]"><span class="text-gray-500">Winning</span><span class="text-green-400">${summary.winning_trades||0}</span></div>
+                            <div class="flex justify-between p-2 rounded bg-white/[0.02]"><span class="text-gray-500">Losing</span><span class="text-red-400">${summary.losing_trades||0}</span></div>
+                            <div class="flex justify-between p-2 rounded bg-white/[0.02]"><span class="text-gray-500">Total Pips</span><span class="${(summary.total_pips||0)>=0?'text-green-400':'text-red-400'} font-mono">${(summary.total_pips||0).toFixed(1)}</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        updateTime();
+        refreshInterval = setInterval(() => renderTradingBot(c), 30000);
+    }
+
+    // ── NEWS ──
+    async function renderNews(c) {
+        c.innerHTML = `<div class="flex items-center justify-center py-20 text-gray-600"><svg class="animate-spin h-6 w-6 mr-3 opacity-50" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span class="text-sm">Loading news...</span></div>`;
+        const result = await api('/api/news/upcoming?hours=72');
+        if (result.status !== 'ok') { c.innerHTML = '<div class="text-center py-12 text-red-400">Error loading news</div>'; return; }
+        const events = result.data || [];
+
+        if (!events.length) { c.innerHTML = '<div class="text-center py-12 text-gray-600">No upcoming events</div>'; return; }
+
+        c.innerHTML = `<div class="glass p-5"><h3 class="text-sm font-bold text-white mb-4">📰 Economic Calendar — ${events.length} events</h3>
+            <div class="space-y-1">${events.map((e,i) => {
+                const isHigh = e.impact && (e.impact.toLowerCase().includes('high')||e.impact.toLowerCase().includes('red'));
+                return `<div class="flex items-center p-3 rounded-lg ${isHigh?'bg-red-500/5 border-l-2 border-red-500':'bg-white/[0.02] border-l-2 border-orange-500/30'} fade-in" style="animation-delay:${i*20}ms">
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2"><span class="text-[10px] font-bold ${isHigh?'text-red-400':'text-orange-400'}">${e.currency||''}</span><span class="text-[9px] text-gray-500 font-mono">${e.datetime||''}</span><span class="text-[9px] text-gray-600">${e.impact||''}</span></div>
+                        <div class="text-sm text-gray-200 truncate">${e.event||''}</div>
+                        <div class="flex items-center gap-3 mt-0.5 text-[10px] text-gray-500">${e.forecast?`<span>F: ${e.forecast}</span>`:''}${e.previous?`<span>P: ${e.previous}</span>`:''}</div>
+                    </div>
+                </div>`;
+            }).join('')}</div></div>`;
+        updateTime();
+    }
+
+    // ── ANALYSIS ──
+    async function renderAnalysis(c) {
+        c.innerHTML = `<div class="flex items-center justify-center py-20 text-gray-600"><svg class="animate-spin h-6 w-6 mr-3 opacity-50" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span class="text-sm">Loading analysis...</span></div>`;
+        const [crossRes, regimeRes] = await Promise.all([api('/api/analysis/cross-asset'), api('/api/analysis/regime')]);
+        const d = crossRes.data || {};
+        const r = regimeRes.data || {};
+
+        const rc = r.regime==='RISK-ON'?'text-green-400':r.regime==='DEFENSIVE'?'text-red-400':'text-yellow-400';
+
+        c.innerHTML = `
+            <div class="glass p-5 mb-4 border ${r.regime==='RISK-ON'?'border-green-500/20':r.regime==='DEFENSIVE'?'border-red-500/20':'border-yellow-500/20'}">
+                <div class="flex justify-between"><div><div class="text-[10px] text-gray-500 mb-1 font-semibold uppercase tracking-wider">Market Regime</div><div class="text-xl font-bold ${rc}">${r.regime||'NEUTRAL'}</div></div>
+                <div class="text-right text-[10px] text-gray-500 font-mono"><div>VIX ${r.vix?.toFixed(1)||'—'}</div><div>DXY ${r.dxy_value?.toFixed(2)||'—'}</div><div>Spread ${r.yield_spread?.toFixed(3)||'—'}</div></div></div>
+            </div>
+            <div class="grid grid-cols-12 gap-5">
+                <div class="col-span-12 md:col-span-4"><div class="glass p-5"><h3 class="text-sm font-bold text-white mb-3">🇺🇸 DXY</h3>
+                    ${d.dxy?`<div class="text-2xl font-bold font-mono text-white">${d.dxy.value?.toFixed(2)}</div><div class="${d.dxy.trend==='bullish'?'text-green-400':'text-red-400'} text-xs mt-1">${d.dxy.trend} ${d.dxy.change?.toFixed(2)}%</div>`:'<div class="text-gray-500 text-sm">No data</div>'}
+                </div></div>
+                <div class="col-span-12 md:col-span-4"><div class="glass p-5"><h3 class="text-sm font-bold text-white mb-3">📈 VIX</h3>
+                    ${d.vix?`<div class="text-2xl font-bold font-mono text-white">${d.vix.value?.toFixed(1)}</div><div class="${d.vix.change>=0?'text-red-400':'text-green-400'} text-xs mt-1">${d.vix.risk_on?'Risk-On':'Risk-Off'}</div>`:'<div class="text-gray-500 text-sm">No data</div>'}
+                </div></div>
+                <div class="col-span-12 md:col-span-4"><div class="glass p-5"><h3 class="text-sm font-bold text-white mb-3">🏦 Yields</h3>
+                    <div class="grid grid-cols-2 gap-2 text-xs">${['2y_yield','10y_yield','30y_yield','spread_2_10'].map(k => `<div class="p-2 rounded bg-white/[0.02]"><div class="text-[9px] text-gray-500">${k.replace('_',' ').toUpperCase()}</div><div class="font-mono text-gray-300">${((d.yields||{})[k]||0).toFixed(3)}%</div></div>`).join('')}</div>
+                    <div class="mt-2 text-xs ${(d.yields||{}).inverted?'text-red-400':'text-green-400'} font-semibold">${(d.yields||{}).inverted?'Yield curve INVERTED':'Normal curve'}</div>
+                </div></div>
+            </div>`;
+        updateTime();
+        refreshInterval = setInterval(() => renderAnalysis(c), 60000);
+    }
+
+    // ── ACCOUNT LOG ──
+    async function renderAccountLog(c) {
+        c.innerHTML = `<div class="flex items-center justify-center py-20 text-gray-600"><svg class="animate-spin h-6 w-6 mr-3 opacity-50" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span class="text-sm">Loading account log...</span></div>`;
+
+        const [historyRes, logsRes] = await Promise.all([
+            api('/api/trading/trades/history?limit=100'), api('/api/trading/logs?limit=200')
+        ]);
+
+        const trades = historyRes.data || [];
+        const logs = logsRes.data || [];
+
+        c.innerHTML = `
+            <div class="grid grid-cols-12 gap-5">
+                <div class="col-span-12 lg:col-span-7">
+                    <div class="glass p-5"><h3 class="text-sm font-bold text-white mb-3">📋 Trade History <span class="text-[9px] text-gray-600 font-normal">${trades.length} total</span></h3>
+                        ${trades.length ? `<div class="overflow-x-auto"><table class="w-full text-xs">
+                            <thead><tr class="text-gray-500 border-b border-white/5">
+                                <th class="text-left py-2 px-2 font-medium">Pair</th><th class="text-center py-2 px-2 font-medium">Dir</th>
+                                <th class="text-right py-2 px-2 font-medium">Entry</th><th class="text-right py-2 px-2 font-medium">SL</th>
+                                <th class="text-right py-2 px-2 font-medium">TP</th><th class="text-right py-2 px-2 font-medium">R:R</th>
+                                <th class="text-center py-2 px-2 font-medium">Status</th><th class="text-right py-2 px-2 font-medium">P&L</th>
+                            </tr></thead>
+                            <tbody>${trades.map(t => `
+                                <tr class="border-b border-white/[0.03] hover:bg-white/[0.02]">
+                                    <td class="py-2 px-2 text-gray-300 font-semibold">${t.pair}</td>
+                                    <td class="py-2 px-2 text-center">${sigBadge(t.direction)}</td>
+                                    <td class="py-2 px-2 text-right font-mono text-yellow-400">${t.entry_price||'—'}</td>
+                                    <td class="py-2 px-2 text-right font-mono text-red-400">${t.stop_loss||'—'}</td>
+                                    <td class="py-2 px-2 text-right font-mono text-green-400">${t.take_profit_1||'—'}</td>
+                                    <td class="py-2 px-2 text-right">${rrBadge(t.risk_reward)}</td>
+                                    <td class="py-2 px-2 text-center"><span class="px-1.5 py-0.5 rounded text-[9px] ${t.status==='ACTIVE'?'bg-green-500/10 text-green-400':'bg-gray-500/10 text-gray-400'}">${t.status||'PENDING'}</span></td>
+                                    <td class="py-2 px-2 text-right font-mono ${(t.pnl||0)>=0?'text-green-400':'text-red-400'}">${t.pnl!==null&&t.pnl!==undefined?t.pnl.toFixed(6):'—'}</td>
+                                </tr>
+                            `).join('')}</tbody>
+                        </table></div>` : '<div class="text-center py-8 text-gray-600">No trades yet</div>'}
+                    </div>
+                </div>
+
+                <div class="col-span-12 lg:col-span-5">
+                    <div class="glass p-5"><h3 class="text-sm font-bold text-white mb-3">📝 Activity Log <span class="text-[9px] text-gray-600 font-normal">${logs.length} entries</span></h3>
+                        <div class="space-y-1 max-h-[600px] overflow-y-auto">
+                            ${logs.length ? logs.map(l => `<div class="p-2 rounded bg-white/[0.02] text-[10px]">
+                                <div class="flex items-center gap-2"><span class="text-gray-500 font-mono">${l.timestamp||''}</span><span class="px-1 py-0.5 rounded bg-white/5 text-gray-400 font-semibold">${l.event||''}</span></div>
+                                <div class="text-gray-400 mt-0.5">${l.message||''}</div>
+                            </div>`).join('') : '<div class="text-center py-4 text-gray-600">No activity yet</div>'}
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        updateTime();
+        refreshInterval = setInterval(() => renderAccountLog(c), 30000);
+    }
+
+    // ── Refresh & Init ──
+    function refreshAll() { const page = document.querySelector('.nav-link[data-page].active'); if (page) navigate(page.dataset.page); }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        updateClock();
+        setInterval(updateClock, 1000);
+        navigate('dashboard');
+    });
+    </script>
+</body>
+</html>
