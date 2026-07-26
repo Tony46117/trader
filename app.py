@@ -27,6 +27,7 @@ from engine.cross_asset import get_cross_asset_analysis, get_market_regime
 from engine.tick_data import get_tick_signal
 from engine.cme_data import get_all_cme_analysis
 from engine.social_news import get_all_social_signals, get_social_signal
+from engine.signal_state import signal_state_manager
 
 app = Flask(__name__)
 
@@ -92,11 +93,21 @@ def api_market_overview():
             price_data = prices.get(pair_key, {})
             sig = unified.get(pair_key, {})
             unified_component = sig.get("unified", {})
+            current = price_data.get("bid", 0)
+
+            # Check SL/TP hits on each refresh
+            pair_info = PAIRS.get(pair_key, {})
+            pip_size = pair_info.get("pip", 0.0001)
+            if current > 0:
+                signal_state_manager.check_price_levels(pair_key, current, pip_size)
+
+            # Re-check active signal after potential hit
+            active = signal_state_manager.get_active_signal(pair_key)
 
             overview[pair_key] = {
                 "name": PAIRS[pair_key]["name"],
                 "type": PAIRS[pair_key]["type"],
-                "price": price_data.get("bid", 0),
+                "price": current,
                 "change": price_data.get("change", 0),
                 "direction": unified_component.get("direction", "NEUTRAL"),
                 "score": unified_component.get("score", 50),
@@ -110,6 +121,8 @@ def api_market_overview():
                 "rr1": sig.get("risk_reward_1"),
                 "timing": sig.get("timing", "WAIT"),
                 "setup_valid": sig.get("setup_valid", False),
+                "signal_state": sig.get("signal_state", {}),
+                "active_signal": active,
             }
 
         return jsonify({"status": "ok", "data": overview})
@@ -282,6 +295,64 @@ def api_social_pair(pair):
         pair = pair.upper()
         data = get_social_signal(pair)
         return jsonify({"status": "ok", "data": data})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+# ── Signal State Endpoints ────────────────────────────────────────
+
+@app.route("/api/signals/active")
+def api_active_signals():
+    try:
+        signals = signal_state_manager.get_all_active_signals()
+        return jsonify({"status": "ok", "data": signals})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+@app.route("/api/signals/active/<pair>")
+def api_active_signal_pair(pair):
+    try:
+        pair = pair.upper()
+        signal = signal_state_manager.get_active_signal(pair)
+        return jsonify({"status": "ok", "data": signal})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+@app.route("/api/signals/close/<pair>", methods=["POST"])
+def api_close_signal(pair):
+    try:
+        pair = pair.upper()
+        data = request.get_json(silent=True) or {}
+        reason = data.get("reason", "MANUAL_CLOSE")
+        result = signal_state_manager.close_signal(pair, reason)
+        if result:
+            return jsonify({"status": "ok", "data": result})
+        return jsonify({"status": "error", "message": f"No active signal for {pair}"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+@app.route("/api/signals/force/<pair>", methods=["POST"])
+def api_force_new_signal(pair):
+    try:
+        pair = pair.upper()
+        signal_state_manager.force_new_signal(pair)
+        return jsonify({"status": "ok", "message": f"Force-closed signal for {pair}"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+@app.route("/api/signals/history")
+@app.route("/api/signals/history/<pair>")
+def api_signal_history(pair=None):
+    try:
+        if pair:
+            pair = pair.upper()
+        limit = request.args.get("limit", 10, type=int)
+        history = signal_state_manager.get_history(pair, limit)
+        return jsonify({"status": "ok", "data": history})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
 

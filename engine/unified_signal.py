@@ -20,6 +20,7 @@ from engine.news_engine import get_news_signal_for_pair, get_all_news_signals
 from engine.tick_data import get_tick_signal
 from engine.cme_data import get_cme_analysis
 from engine.social_news import get_social_signal
+from engine.signal_state import signal_state_manager
 
 # Weights for each signal component
 WEIGHTS = {
@@ -31,6 +32,67 @@ WEIGHTS = {
 }
 
 MIN_RR = SIGNAL_CONFIG.get("min_rr_ratio", 2.0)
+
+
+def _build_signal_response(pair_key, signal_data, hit_type=None, current_price=0):
+    """Build a response dict from an active/closed signal state."""
+    pair_info = PAIRS.get(pair_key, {})
+    direction = signal_data.get("direction", "NEUTRAL")
+    status = signal_data.get("status", "ACTIVE")
+    pip_size = pair_info.get("pip", 0.0001)
+
+    # Compute distance to SL/TP
+    sl_dist = 0
+    tp_dist = 0
+    if current_price > 0 and signal_data.get("entry"):
+        if direction == "BUY":
+            sl_dist = current_price - signal_data.get("sl", current_price)
+            tp_dist = signal_data.get("tp1", current_price) - current_price
+        else:
+            sl_dist = signal_data.get("sl", current_price) - current_price
+            tp_dist = current_price - signal_data.get("tp1", current_price)
+
+    result = {
+        "pair": pair_key,
+        "pair_name": pair_info.get("name", pair_key),
+        "type": pair_info.get("type", "unknown"),
+        "current_price": round(current_price, 5 if pair_info.get("type") == "forex" else 2),
+        "entry_price": signal_data.get("entry"),
+        "stop_loss": signal_data.get("sl"),
+        "take_profit_1": signal_data.get("tp1"),
+        "take_profit_2": signal_data.get("tp2"),
+        "take_profit_3": signal_data.get("tp3"),
+        "risk_reward_1": signal_data.get("rr1"),
+        "timing": "ACTIVE",
+        "setup_valid": True,
+        "price_change_24h": 0,
+        "updated": datetime.now().strftime("%H:%M:%S"),
+        # Signal state info
+        "signal_state": {
+            "status": status,
+            "created_at": signal_data.get("created_at"),
+            "closed_at": signal_data.get("closed_at"),
+            "pips_result": signal_data.get("pips_result", 0),
+            "hit_type": hit_type,
+        },
+        "unified": {
+            "score": signal_data.get("score", 50),
+            "direction": direction,
+            "verdict": signal_data.get("verdict", ""),
+            "confidence": signal_data.get("confidence", "LOW"),
+            "agreement": "ALIGNED",
+            "components": {"technical": 50, "news": 50, "tick": 50, "cme": 50, "social": 50},
+        },
+        "technical_signal": {"score": signal_data.get("score", 50), "direction": direction, "indicators": []},
+        "news_signal": {"score": 50, "direction": "NEUTRAL"},
+        "tick_signal": {"score": 50, "direction": "NEUTRAL"},
+        "cme_signal": {"score": 50, "direction": "NEUTRAL"},
+        "social_signal": {"score": 50, "direction": "NEUTRAL"},
+        "support_levels": [],
+        "resistance_levels": [],
+        "cme_levels": {},
+    }
+    return result
 
 
 def _score_to_direction(score):
@@ -62,7 +124,36 @@ def generate_unified_signal(pair_key):
     """Generate a comprehensive unified signal for a single pair.
 
     Combines technical, news, tick, CME, and social signals into one verdict.
+    If an active signal already exists for this pair, returns that instead.
     """
+    # ── Check for existing active signal ──
+    active = signal_state_manager.get_active_signal(pair_key)
+    if active:
+        # Check if price has hit SL/TP
+        pair_info = PAIRS.get(pair_key, {})
+        pip_size = pair_info.get("pip", 0.0001)
+        try:
+            from engine.market_data import get_current_prices
+            prices = get_current_prices()
+            current = prices.get(pair_key, {}).get("bid", 0)
+            if current > 0:
+                hit_type, hit_data = signal_state_manager.check_price_levels(pair_key, current, pip_size)
+                if hit_type:
+                    # Signal was hit — return the closed signal info
+                    return _build_signal_response(pair_key, hit_data, hit_type=hit_type, current_price=current)
+        except Exception:
+            pass
+
+        # Return active signal with current price
+        try:
+            from engine.market_data import get_current_prices
+            prices = get_current_prices()
+            current = prices.get(pair_key, {}).get("bid", 0)
+        except Exception:
+            current = active.get("entry", 0)
+
+        return _build_signal_response(pair_key, active, current_price=current)
+
     # ── 1. Technical signal ──
     tech = generate_technical_signal(pair_key)
     if tech is None:
@@ -168,7 +259,7 @@ def generate_unified_signal(pair_key):
     # ── Build CME key levels ──
     cme_levels = cme.get("key_levels", {})
 
-    return {
+    response = {
         "pair": pair_key,
         "pair_name": pair_name,
         "type": PAIRS.get(pair_key, {}).get("type", "unknown"),
@@ -252,6 +343,34 @@ def generate_unified_signal(pair_key):
         "updated": datetime.now().strftime("%H:%M:%S"),
     }
 
+    # ── Register signal with state manager if valid ──
+    if direction != "NEUTRAL" and tech.get("entry") and tech.get("sl") and tech.get("tp1"):
+        pair_info = PAIRS.get(pair_key, {})
+        pip_size = pair_info.get("pip", 0.0001)
+        signal_state_manager.check_price_levels(pair_key, current_price, pip_size)
+        signal_state_manager.set_active_signal(
+            pair=pair_key,
+            direction=direction,
+            entry=tech["entry"],
+            sl=tech["sl"],
+            tp1=tech["tp1"],
+            tp2=tech.get("tp2"),
+            tp3=tech.get("tp3"),
+            rr1=tech.get("rr1", 0),
+            score=round(combined_score, 0),
+            confidence=confidence,
+            verdict=verdict,
+        )
+
+    # Include signal state in response
+    active = signal_state_manager.get_active_signal(pair_key)
+    if active:
+        response["signal_state"] = active
+    else:
+        response["signal_state"] = {"status": "NO_SIGNAL"}
+
+    return response
+
 
 def generate_all_unified_signals():
     """Generate unified signals for all trading pairs."""
@@ -276,12 +395,13 @@ def generate_all_unified_signals():
 
 
 def get_top_setups(min_score=60, max_results=5):
-    """Get the best trading setups ranked by unified score.
+    """Get the best trading setups ranked by unified signal state.
 
     Only returns setups that:
     1. Have minimum 1:2 risk-reward ratio
     2. Have a non-NEUTRAL direction
     3. Meet the minimum score threshold
+    Active signals take priority over new potential setups.
     """
     all_sigs = generate_all_unified_signals()
     setups = []
@@ -303,6 +423,10 @@ def get_top_setups(min_score=60, max_results=5):
             continue
 
         setup_quality = score * (1.0 if confidence == "HIGH" else 0.8 if confidence == "MEDIUM" else 0.5)
+
+        # Check signal state
+        signal_state = sig.get("signal_state", {})
+        is_active_signal = signal_state.get("status") == "ACTIVE"
 
         setups.append({
             "pair": pair_key,
@@ -327,7 +451,10 @@ def get_top_setups(min_score=60, max_results=5):
             "current_price": sig.get("current_price"),
             "cme_levels": sig.get("cme_levels", {}),
             "setup_valid": sig.get("setup_valid", False),
+            "signal_state": signal_state,
+            "is_active_signal": is_active_signal,
         })
 
-    setups.sort(key=lambda x: x["setup_quality"], reverse=True)
+    # Active signals first, then by quality
+    setups.sort(key=lambda x: (not x.get("is_active_signal", False), -x["setup_quality"]))
     return setups[:max_results]

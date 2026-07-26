@@ -36,11 +36,11 @@ function formatTimestamp() {
 }
 
 function rrBadge(rr) {
-    if (rr === null || rr === undefined) return '<span class="text-[9px] text-gray-600">—</span>';
+    if (rr === null || rr === undefined) return '<span class="text-[9px]" style="color: var(--text-muted)">—</span>';
     const rrNum = parseFloat(rr);
-    if (rrNum < 2.0) return `<span class="text-[9px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 font-semibold">1:${rrNum.toFixed(1)} LOW</span>`;
-    if (rrNum >= 4.0) return `<span class="text-[9px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 font-semibold">1:${rrNum.toFixed(1)}</span>`;
-    return `<span class="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-semibold">1:${rrNum.toFixed(1)}</span>`;
+    if (rrNum < 2.0) return `<span class="text-[9px] px-1.5 py-0.5" style="background: rgba(239, 68, 68, 0.08); color: var(--accent-red); border: 1px solid rgba(239, 68, 68, 0.15); font-family: JetBrains Mono, monospace; font-weight: 600;">1:${rrNum.toFixed(1)} LOW</span>`;
+    if (rrNum >= 4.0) return `<span class="text-[9px] px-1.5 py-0.5" style="background: rgba(16, 185, 129, 0.08); color: var(--accent-green); border: 1px solid rgba(16, 185, 129, 0.15); font-family: JetBrains Mono, monospace; font-weight: 600;">1:${rrNum.toFixed(1)}</span>`;
+    return `<span class="text-[9px] px-1.5 py-0.5" style="background: rgba(37, 99, 235, 0.08); color: var(--accent-blue-light); border: 1px solid rgba(37, 99, 235, 0.15); font-family: JetBrains Mono, monospace; font-weight: 600;">1:${rrNum.toFixed(1)}</span>`;
 }
 
 // ── API Calls ────────────────────────────────────────────────────────
@@ -52,6 +52,15 @@ async function apiFetch(endpoint) {
     } catch (err) {
         console.error(`API error [${endpoint}]:`, err);
         return { status: 'error', message: err.message };
+    }
+}
+
+async function closeSignal(pair) {
+    try {
+        await fetch(`${API_BASE}/api/signals/close/${pair}`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({reason: 'MANUAL_CLOSE'}) });
+        refreshAll();
+    } catch (err) {
+        console.error('Close signal error:', err);
     }
 }
 
@@ -69,8 +78,10 @@ async function refreshMarketOverview() {
         const item = data[pair];
         const cls = signalClass(item.direction);
         const isValid = item.setup_valid;
+        const sigState = item.signal_state || {};
+        const isActive = sigState.status === 'ACTIVE';
 
-        card.className = `pair-card ${cls}-highlight` + (isValid ? ' setup-valid' : '');
+        card.className = `pair-card ${cls}-highlight` + (isValid ? ' setup-valid' : '') + (isActive ? ' signal-active' : '');
 
         const priceEl = card.querySelector('.pair-price');
         if (priceEl) priceEl.textContent = formatPrice(item.price, pair);
@@ -92,6 +103,20 @@ async function refreshMarketOverview() {
 
         const rrEl = card.querySelector('.pair-rr');
         if (rrEl) rrEl.innerHTML = rrBadge(item.rr1);
+
+        // Signal state indicator
+        const stateEl = card.querySelector('.pair-signal-state');
+        if (stateEl) {
+            if (isActive) {
+                stateEl.innerHTML = '<div class="flex items-center gap-1"><div class="w-1.5 h-1.5" style="background: var(--accent-blue);"></div><span class="text-[9px] font-semibold" style="color: var(--accent-blue-light);">ACTIVE</span></div>';
+            } else if (sigState.status?.startsWith('HIT_TP')) {
+                stateEl.innerHTML = `<span class="text-[9px] font-semibold" style="color: var(--accent-green);">TP HIT</span>`;
+            } else if (sigState.status === 'HIT_SL') {
+                stateEl.innerHTML = `<span class="text-[9px] font-semibold" style="color: var(--accent-red);">SL HIT</span>`;
+            } else {
+                stateEl.innerHTML = '';
+            }
+        }
 
         if (!isValid) {
             const invalidBadge = card.querySelector('.invalid-badge');
@@ -131,30 +156,53 @@ async function refreshSetups() {
     container.innerHTML = setups.map((s, i) => {
         const cls = signalClass(s.direction);
         const isValid = s.setup_valid !== false;
+        const isActive = s.is_active_signal;
+        const sigState = s.signal_state || {};
+        const statusLabel = sigState.status === 'ACTIVE' ? 'ACTIVE SIGNAL' : 
+                           sigState.status === 'HIT_TP1' ? 'TP1 HIT' :
+                           sigState.status === 'HIT_TP2' ? 'TP2 HIT' :
+                           sigState.status === 'HIT_TP3' ? 'TP3 HIT' :
+                           sigState.status === 'HIT_SL' ? 'STOPPED OUT' : '';
+        const stateClass = sigState.status === 'ACTIVE' ? 'signal-active' :
+                          sigState.status?.startsWith('HIT_TP') ? 'signal-hit-tp' :
+                          sigState.status === 'HIT_SL' ? 'signal-hit-sl' : '';
+
         return `
-            <div class="setup-card setup-card-${cls} fade-in" style="animation-delay: ${i * 50}ms">
+            <div class="setup-card setup-card-${cls} fade-in ${stateClass}" style="animation-delay: ${i * 50}ms">
                 <div class="flex items-center justify-between">
                     <div class="flex items-center gap-3">
-                        <div class="w-9 h-9 rounded-xl ${cls === 'buy' ? 'bg-green-500/15 text-green-400' : 'bg-red-500/15 text-red-400'} flex items-center justify-center text-sm font-bold">
+                        <div class="w-9 h-9 flex items-center justify-center text-sm font-bold ${cls === 'buy' ? 'signal-buy-icon' : 'signal-sell-icon'}" style="background: ${cls === 'buy' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)'}; color: ${cls === 'buy' ? 'var(--accent-green)' : 'var(--accent-red)'};">
                             ${s.direction === 'BUY' ? '↑' : '↓'}
                         </div>
                         <div>
-                            <div class="text-sm font-bold text-white">${s.pair_name || s.pair}</div>
-                            <div class="text-[10px] text-gray-500 max-w-[200px] truncate">${s.verdict ? s.verdict.substring(0, 55) : ''}</div>
+                            <div class="text-sm font-bold" style="color: var(--text-primary);">${s.pair_name || s.pair}</div>
+                            <div class="text-[10px] max-w-[200px] truncate" style="color: var(--text-muted);">${s.verdict ? s.verdict.substring(0, 55) : ''}</div>
                         </div>
                     </div>
                     <div class="text-right">
                         <div class="text-base font-bold font-mono ${cls === 'buy' ? 'text-green-400' : 'text-red-400'}">${s.score}</div>
                         <div class="flex items-center gap-1.5 justify-end mt-0.5">
                             ${signalBadge(s.direction)}
-                            <span class="text-[9px] text-gray-500">${s.timing}</span>
+                            <span class="text-[9px]" style="color: var(--text-muted);">${s.timing}</span>
                         </div>
                     </div>
                 </div>
-                <div class="flex items-center justify-between mt-2 pt-2 border-t border-white/[0.04]">
-                    <div class="text-[9px] text-gray-600">${s.confidence} confidence</div>
+                ${isActive ? `
+                <div class="flex items-center justify-between mt-2 pt-2" style="border-top: 1px solid var(--border-color);">
+                    <div class="flex items-center gap-2">
+                        <div class="w-1.5 h-1.5" style="background: var(--accent-blue);"></div>
+                        <span class="text-[10px] font-semibold" style="color: var(--accent-blue-light);">ACTIVE SIGNAL</span>
+                    </div>
+                    <button onclick="closeSignal('${s.pair}')" class="text-[9px] px-2 py-1 transition-all" style="background: rgba(239, 68, 68, 0.08); color: var(--accent-red); border: 1px solid rgba(239, 68, 68, 0.15);">Close</button>
+                </div>` : ''}
+                ${statusLabel && !isActive ? `
+                <div class="flex items-center mt-2 pt-2" style="border-top: 1px solid var(--border-color);">
+                    <span class="text-[10px] font-semibold ${sigState.status?.startsWith('HIT_TP') ? 'text-green-400' : sigState.status === 'HIT_SL' ? 'text-red-400' : ''}" style="color: ${sigState.status?.startsWith('HIT_TP') ? 'var(--accent-green)' : sigState.status === 'HIT_SL' ? 'var(--accent-red)' : 'var(--text-muted)'};">${statusLabel}${sigState.pips_result ? ` (${sigState.pips_result > 0 ? '+' : ''}${sigState.pips_result} pips)` : ''}</span>
+                </div>` : ''}
+                <div class="flex items-center justify-between mt-2 pt-2" style="border-top: 1px solid var(--border-color);">
+                    <div class="text-[9px]" style="color: var(--text-muted);">${s.confidence} confidence</div>
                     <div class="flex items-center gap-1">
-                        <span class="text-[9px] text-gray-600">R:R</span>
+                        <span class="text-[9px]" style="color: var(--text-muted);">R:R</span>
                         ${rrBadge(s.risk_reward_1)}
                     </div>
                 </div>
