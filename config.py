@@ -25,6 +25,7 @@ CROSS_ASSETS = {
 
 # News data directory
 NEWS_DIR = os.path.join(BASE_DIR, "data", "news")
+os.makedirs(NEWS_DIR, exist_ok=True)
 
 # Cache directory
 CACHE_DIR = os.path.join(BASE_DIR, "data", "cache")

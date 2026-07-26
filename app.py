@@ -23,6 +23,9 @@ from engine.news_engine import get_all_upcoming_events, get_news_summary, load_n
 from engine.signal_engine import generate_all_technical_signals
 from engine.unified_signal import generate_unified_signal, generate_all_unified_signals, get_top_setups
 from engine.cross_asset import get_cross_asset_analysis, get_market_regime
+from engine.tick_data import get_tick_signal
+from engine.cme_data import get_all_cme_analysis
+from engine.social_news import get_all_social_signals, get_social_signal
 
 app = Flask(__name__)
 
@@ -216,6 +219,75 @@ def api_prices():
     try:
         prices = get_current_prices()
         return jsonify({"status": "ok", "data": prices})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+# ── Tick Data API ────────────────────────────────────────────────────
+
+@app.route("/api/tick/<pair>")
+def api_tick_data(pair):
+    """API: Get tick-level volatility and momentum for a pair."""
+    try:
+        pair = pair.upper()
+        prices = get_current_prices()
+        price = prices.get(pair, {}).get("bid", 0)
+        if price == 0:
+            return jsonify({"status": "error", "message": f"No price data for {pair}"})
+        signal = get_tick_signal(pair, price)
+        return jsonify({"status": "ok", "data": signal})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+# ── CME Futures & Options API ────────────────────────────────────────
+
+@app.route("/api/cme")
+def api_cme_all():
+    """API: Get CME futures/options analysis for all pairs."""
+    try:
+        prices = get_current_prices()
+        data = get_all_cme_analysis(prices)
+        return jsonify({"status": "ok", "data": data})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+@app.route("/api/cme/<pair>")
+def api_cme_pair(pair):
+    """API: Get CME analysis for a specific pair."""
+    try:
+        pair = pair.upper()
+        from engine.cme_data import get_cme_analysis
+        prices = get_current_prices()
+        price = prices.get(pair, {}).get("bid", 1.0)
+        if price == 0:
+            price = 1.0
+        data = get_cme_analysis(pair, price)
+        return jsonify({"status": "ok", "data": data})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+# ── Social Media Sentiment API ───────────────────────────────────────
+
+@app.route("/api/social")
+def api_social_all():
+    """API: Get social media sentiment for all pairs."""
+    try:
+        data = get_all_social_signals()
+        return jsonify({"status": "ok", "data": data})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+@app.route("/api/social/<pair>")
+def api_social_pair(pair):
+    """API: Get social media sentiment for a specific pair."""
+    try:
+        pair = pair.upper()
+        data = get_social_signal(pair)
+        return jsonify({"status": "ok", "data": data})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
 

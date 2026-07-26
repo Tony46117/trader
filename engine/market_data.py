@@ -10,12 +10,13 @@ import numpy as np
 from datetime import datetime, timedelta
 import yfinance as yf
 import ccxt
+import requests
 
 from config import PAIRS, CROSS_ASSETS, CACHE_DIR
 
 
 def fetch_yahoo_data(ticker, period="1mo", interval="1h"):
-    """Fetch data from Yahoo Finance."""
+    """Fetch data from Yahoo Finance with timeout."""
     cache_key = f"yahoo_{ticker}_{period}_{interval}".replace("^", "_")
     cache_path = os.path.join(CACHE_DIR, f"{cache_key}.json")
 
@@ -28,17 +29,32 @@ def fetch_yahoo_data(ticker, period="1mo", interval="1h"):
 
     try:
         stock = yf.Ticker(ticker)
-        df = stock.history(period=period, interval=interval)
+        session = requests.Session()
+        # Use concurrent.futures with a timeout to prevent hanging
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                stock.history, period=period, interval=interval,
+                auto_adjust=False, session=session
+            )
+            try:
+                df = future.result(timeout=15)
+            except TimeoutError:
+                print(f"⏰ Yahoo fetch timeout for {ticker} (15s)")
+                return pd.DataFrame()
         if not df.empty:
             df.to_json(cache_path)
         return df
+    except requests.exceptions.Timeout:
+        print(f"⏰ Yahoo fetch timeout for {ticker}")
+        return pd.DataFrame()
     except Exception as e:
         print(f"⚠️ Yahoo fetch error for {ticker}: {e}")
         return pd.DataFrame()
 
 
 def fetch_crypto_data(symbol="BTC/USDT", limit=200):
-    """Fetch crypto data from Binance via ccxt."""
+    """Fetch crypto data from Binance via ccxt (with timeout)."""
     cache_key = f"crypto_{symbol.replace('/', '_')}_{limit}".replace("^", "_")
     cache_path = os.path.join(CACHE_DIR, f"{cache_key}.json")
 
@@ -49,7 +65,10 @@ def fetch_crypto_data(symbol="BTC/USDT", limit=200):
                 return pd.read_json(f)
 
     try:
-        exchange = ccxt.binance({"enableRateLimit": True})
+        exchange = ccxt.binance({
+            "enableRateLimit": True,
+            "timeout": 10000,  # 10 second timeout
+        })
         ohlcv = exchange.fetch_ohlcv(symbol, "1h", limit=limit)
         df = pd.DataFrame(
             ohlcv,

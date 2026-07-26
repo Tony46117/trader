@@ -20,70 +20,23 @@ from datetime import datetime, timedelta
 from config import PAIRS, SIGNAL_CONFIG
 from engine.market_data import get_historical_data, get_current_prices
 
-# ── TA-Lib wrapper (uses local implementation if TA-Lib not importable) ──
-try:
-    import talib
-    HAS_TALIB = True
-except ImportError:
-    HAS_TALIB = False
-
-
-def compute_rsi(series, period=14):
-    """RSI — standard 14-period."""
-    if HAS_TALIB:
-        return talib.RSI(series.values, timeperiod=period)
-    delta = series.diff()
-    gain = delta.where(delta > 0, 0.0)
-    loss = (-delta.where(delta < 0, 0.0))
-    avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
-    rs = avg_gain / avg_loss
-    return pd.Series(100 - (100 / (1 + rs)), index=series.index)
-
-
-def compute_macd(series, fast=12, slow=26, signal=9):
-    """MACD with signal line and histogram."""
-    if HAS_TALIB:
-        macd_line, signal_line, hist = talib.MACD(series.values, fast, slow, signal)
-        return macd_line, signal_line, hist
-    ema_fast = series.ewm(span=fast, adjust=False).mean()
-    ema_slow = series.ewm(span=slow, adjust=False).mean()
-    macd_line = ema_fast - ema_slow
-    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
-    return macd_line, signal_line, macd_line - signal_line
-
-
-def compute_bollinger_bands(series, period=20, std_dev=2):
-    """Bollinger Bands."""
-    if HAS_TALIB:
-        upper, mid, lower = talib.BBANDS(series.values, period, std_dev, std_dev)
-        return upper, mid, lower
-    sma = series.rolling(window=period).mean()
-    std = series.rolling(window=period).std()
-    return sma + (std * std_dev), sma, sma - (std * std_dev)
-
-
-def compute_stoch_rsi(series, period=14, k_period=3, d_period=3):
-    """Stochastic RSI — TradingView favourite."""
-    rsi = pd.Series(compute_rsi(series, period))
-    min_rsi = rsi.rolling(window=period).min()
-    max_rsi = rsi.rolling(window=period).max()
-    stoch = (rsi - min_rsi) / (max_rsi - min_rsi).replace(0, np.nan) * 100
-    k = stoch.rolling(window=k_period).mean()
-    d = k.rolling(window=d_period).mean()
-    return k, d
+# ── C++ accelerated indicators (with pure Python fallback) ──
+from engine.cpp_indicator import (
+    compute_rsi,
+    compute_macd,
+    compute_bollinger_bands,
+    compute_stoch_rsi,
+    compute_atr as _fast_atr,
+    compute_ema,
+    compute_sma,
+)
 
 
 def compute_atr(df, period=14):
-    """Average True Range."""
-    high, low, close = df["High"].values, df["Low"].values, df["Close"].values
-    if HAS_TALIB:
-        return talib.ATR(high, low, close, timeperiod=period)
-    tr1 = df["High"] - df["Low"]
-    tr2 = abs(df["High"] - df["Close"].shift())
-    tr3 = abs(df["Low"] - df["Close"].shift())
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    return tr.ewm(alpha=1/period, adjust=False).mean()
+    """Average True Range — wraps C++ indicator with DataFrame support."""
+    return _fast_atr(
+        df["High"], df["Low"], df["Close"], period
+    )
 
 
 def compute_ichimoku(df):

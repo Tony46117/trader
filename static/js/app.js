@@ -1,989 +1,804 @@
-/**
- * Trading Signal Framework — Frontend Application
- * Handles all data fetching, rendering, and live updates.
- */
+/* ── Trading Signals Dashboard — Main Application ───────────── */
 
-// ── Utility ──────────────────────────────────────────────────────
+const API_BASE = '';
+let refreshInterval = null;
+let charts = {};
 
-function formatPrice(price, pair = 'EURUSD') {
-    if (!price || price === 0) return '—';
-    const precision = pair.startsWith('BTC') || pair.startsWith('ETH') ? 2 : pair === 'XAUUSD' ? 2 : 5;
-    return price.toFixed(precision);
+// ── Utilities ────────────────────────────────────────────────────────
+
+function formatPrice(num, pair) {
+    if (num === null || num === undefined || num === 0) return '—';
+    const decimals = pair && (pair.includes('BTC') || pair.includes('ETH') || pair.includes('XAU')) ? 2 : 5;
+    return num.toFixed(decimals);
 }
 
-function formatChange(change) {
-    if (change === undefined || change === null) return '—';
-    const prefix = change >= 0 ? '+' : '';
-    return `${prefix}${change.toFixed(2)}%`;
+function formatChange(val) {
+    if (val === null || val === undefined) return '0.00%';
+    const sign = val >= 0 ? '+' : '';
+    return `${sign}${val.toFixed(2)}%`;
 }
 
-function timeAgo(datetimeStr) {
-    const now = new Date();
-    const event = new Date(datetimeStr);
-    const diffMs = event - now;
-    const diffMins = Math.floor(diffMs / 60000);
-
-    if (diffMins < 0) return `${Math.abs(diffMins)}m ago`;
-    if (diffMins < 60) return `in ${diffMins}m`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `in ${diffHours}h`;
-    const diffDays = Math.floor(diffHours / 24);
-    return `in ${diffDays}d`;
+function timeSince(dateStr) {
+    if (!dateStr || dateStr === '—') return '—';
+    return dateStr;
 }
 
-function getDirectionClass(direction) {
-    if (!direction) return 'badge-neutral';
-    const dir = direction.toUpperCase();
-    if (dir === 'BUY' || dir === 'BULLISH') return 'badge-buy';
-    if (dir === 'SELL' || dir === 'BEARISH') return 'badge-sell';
-    return 'badge-neutral';
+function signalClass(signal) {
+    if (!signal) return 'neutral';
+    const s = signal.toUpperCase();
+    if (s === 'BUY' || s === 'BULLISH' || s === 'STRONG_BUY') return 'buy';
+    if (s === 'SELL' || s === 'BEARISH' || s === 'STRONG_SELL') return 'sell';
+    return 'neutral';
 }
 
-function getDirectionText(direction) {
-    if (!direction) return '—';
-    const dir = direction.toUpperCase();
-    if (dir === 'BUY' || dir === 'BULLISH') return 'BUY ↑';
-    if (dir === 'SELL' || dir === 'BEARISH') return 'SELL ↓';
-    if (dir === 'MIXED') return 'MIXED ⇅';
-    return dir;
+function signalBadge(signal, text) {
+    const cls = signalClass(signal);
+    const label = text || signal || 'NEUTRAL';
+    return `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold badge-${cls}">${label}</span>`;
 }
 
-function strengthToWidth(strength) {
-    return Math.min(100, (strength / 5) * 100);
+function formatTimestamp() {
+    return new Date().toLocaleTimeString('en-US', { hour12: false });
 }
 
-// ── API Fetching ────────────────────────────────────────────────
+// ── API Calls ────────────────────────────────────────────────────────
 
-async function fetchAPI(endpoint) {
+async function apiFetch(endpoint) {
     try {
-        const res = await fetch(endpoint);
+        const res = await fetch(`${API_BASE}${endpoint}`);
         const data = await res.json();
         return data;
     } catch (err) {
-        console.error(`API Error [${endpoint}]:`, err);
+        console.error(`API error [${endpoint}]:`, err);
         return { status: 'error', message: err.message };
     }
 }
 
-// ── Dashboard Page ──────────────────────────────────────────────
-
-async function refreshAll() {
-    updateTimestamp();
-    await Promise.all([
-        refreshMarketOverview(),
-        refreshSetups(),
-        refreshUnifiedMatrix(),
-        refreshRegime(),
-        refreshCrossAssetSnapshot(),
-        refreshNewsPreview(),
-    ]);
-}
-
-function updateTimestamp() {
-    const el = document.getElementById('last-update');
-    if (el) el.textContent = new Date().toLocaleTimeString('en-US', { hour12: false });
-}
+// ── Dashboard Functions ────────────────────────────────────────────
 
 async function refreshMarketOverview() {
-    const [priceData, unifiedData] = await Promise.all([
-        fetchAPI('/api/prices'),
-        fetchAPI('/api/market/overview'),
-    ]);
+    const result = await apiFetch('/api/market/overview');
+    if (result.status !== 'ok' || !result.data) return;
 
-    const prices = priceData.status === 'ok' ? priceData.data : {};
-    const unified = unifiedData.status === 'ok' ? unifiedData.data : {};
-
-    Object.entries(prices).forEach(([pair, info]) => {
+    const data = result.data;
+    Object.keys(data).forEach(pair => {
         const card = document.getElementById(`card-${pair}`);
         if (!card) return;
 
+        const item = data[pair];
+        const cls = signalClass(item.direction);
+        card.className = `pair-card ${cls}-highlight`;
+
         const priceEl = card.querySelector('.pair-price');
+        if (priceEl) priceEl.textContent = formatPrice(item.price, pair);
+
         const changeEl = card.querySelector('.pair-change');
-        const directionEl = card.querySelector('.pair-direction');
-        const slEl = card.querySelector('.pair-sl');
-        const tpEl = card.querySelector('.pair-tp');
-
-        if (priceEl) priceEl.textContent = formatPrice(info.bid, pair);
         if (changeEl) {
-            changeEl.textContent = formatChange(info.change);
-            changeEl.className = `text-[11px] font-mono pair-change ${info.change >= 0 ? 'text-green-400' : 'text-red-400'}`;
+            changeEl.textContent = formatChange(item.change);
+            changeEl.className = `text-[11px] font-mono pair-change ${item.change >= 0 ? 'text-green-400' : 'text-red-400'}`;
         }
 
-        // Get direction from unified signal
-        const sig = unified[pair] || {};
-        if (directionEl) {
-            directionEl.textContent = getDirectionText(sig.direction);
-            directionEl.className = `text-[10px] font-semibold px-1.5 py-0.5 rounded pair-direction ${getDirectionClass(sig.direction)}`;
-        }
-        if (slEl) slEl.textContent = formatPrice(sig.sl, pair);
-        if (tpEl) tpEl.textContent = formatPrice(sig.tp1, pair);
+        const dirEl = card.querySelector('.pair-direction');
+        if (dirEl) dirEl.innerHTML = signalBadge(item.direction);
+
+        const slEl = card.querySelector('.pair-sl');
+        if (slEl) slEl.textContent = formatPrice(item.sl, pair);
+
+        const tpEl = card.querySelector('.pair-tp');
+        if (tpEl) tpEl.textContent = formatPrice(item.tp1, pair);
     });
+
+    updateLastUpdate();
 }
 
 async function refreshSetups() {
+    const result = await apiFetch('/api/signals/setups?min_score=55&max=5');
+    if (result.status !== 'ok' || !result.data) return;
+
     const container = document.getElementById('setups-container');
     const countEl = document.getElementById('setup-count');
     if (!container) return;
 
-    const data = await fetchAPI('/api/signals/setups?min_score=60&max=5');
-    if (data.status !== 'ok') {
-        container.innerHTML = `<div class="text-center py-8 text-gray-600">Failed to load signals</div>`;
-        return;
-    }
-
-    const setups = data.data;
-    if (countEl) countEl.textContent = `${setups.length} active setup${setups.length !== 1 ? 's' : ''}`;
+    const setups = result.data;
+    if (countEl) countEl.textContent = `${setups.length} active setups`;
 
     if (setups.length === 0) {
         container.innerHTML = `
-            <div class="text-center py-8">
-                <div class="text-2xl mb-2">🔍</div>
-                <div class="text-gray-500 text-sm">No high-quality setups detected</div>
-                <div class="text-gray-600 text-xs mt-1">Waiting for stronger confluence signals</div>
+            <div class="flex flex-col items-center justify-center py-8 text-gray-600">
+                <svg class="w-10 h-10 mb-2 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <span class="text-sm">No active setups above threshold</span>
+                <span class="text-xs mt-1">Waiting for clearer signals</span>
             </div>`;
         return;
     }
 
-    container.innerHTML = setups.map(setup => `
-        <div class="p-3 rounded-lg ${getDirectionClass(setup.direction)} mb-2 fade-in">
-            <div class="flex items-center justify-between">
+    container.innerHTML = setups.map((s, i) => {
+        const cls = signalClass(s.direction);
+        return `
+            <div class="flex items-center justify-between p-3 rounded-lg bg-dark-800/50 border border-dark-700/30 fade-in" style="animation-delay: ${i * 50}ms">
                 <div class="flex items-center gap-3">
-                    <span class="font-semibold text-sm text-white">${setup.pair_name}</span>
-                    <span class="text-[10px] text-gray-500 uppercase">${setup.type}</span>
-                    <span class="text-xs font-mono font-bold ${setup.direction === 'BUY' ? 'text-green-400' : 'text-red-400'}">
-                        ${getDirectionText(setup.direction)}
-                    </span>
-                </div>
-                <div class="flex items-center gap-2">
-                    <!-- Technical + News score badges -->
-                    <div class="flex items-center gap-1 text-[9px]">
-                        <span class="text-blue-400">T:</span>
-                        <span class="font-mono ${setup.tech_score >= 60 ? 'text-green-400' : setup.tech_score <= 40 ? 'text-red-400' : 'text-gray-400'}">${setup.tech_score ?? '—'}</span>
+                    <div class="w-8 h-8 rounded-full ${cls === 'buy' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'} flex items-center justify-center text-xs font-bold">
+                        ${s.direction === 'BUY' ? 'B' : 'S'}
                     </div>
-                    <div class="flex items-center gap-1 text-[9px]">
-                        <span class="text-yellow-400">N:</span>
-                        <span class="font-mono ${setup.news_score >= 60 ? 'text-green-400' : setup.news_score <= 40 ? 'text-red-400' : 'text-gray-400'}">${setup.news_score ?? '—'}</span>
+                    <div>
+                        <div class="text-sm font-semibold text-white">${s.pair_name || s.pair}</div>
+                        <div class="text-[10px] text-gray-500">${s.verdict ? s.verdict.substring(0, 60) + '...' : ''}</div>
                     </div>
-                    <span class="text-[10px] px-1.5 py-0.5 rounded ${
-                        setup.confidence === 'HIGH' ? 'bg-green-500/15 text-green-400' :
-                        setup.confidence === 'MEDIUM' ? 'bg-yellow-500/15 text-yellow-400' :
-                        'bg-gray-500/15 text-gray-400'
-                    }">${setup.confidence}</span>
-                    <span class="text-[10px] px-1.5 py-0.5 rounded ${
-                        setup.timing === 'IMMEDIATE' ? 'bg-yellow-500/15 text-yellow-400' :
-                        setup.timing === 'SOON' ? 'bg-blue-500/15 text-blue-400' :
-                        'bg-gray-500/15 text-gray-400'
-                    }">${setup.timing}</span>
                 </div>
-            </div>
-            <div class="mt-1.5 mb-2 text-[11px] text-gray-400 italic">${setup.verdict}</div>
-            <div class="flex items-center gap-4 text-xs">
-                <span class="text-gray-500">Price: <span class="text-gray-300 font-mono">${formatPrice(setup.current_price, setup.pair)}</span></span>
-                <span class="text-gray-500">Entry: <span class="text-gray-300 font-mono">${formatPrice(setup.entry, setup.pair)}</span></span>
-                <span class="text-red-400">SL: <span class="font-mono">${formatPrice(setup.sl, setup.pair)}</span></span>
-                <span class="text-green-400">TP1: <span class="font-mono">${formatPrice(setup.tp1, setup.pair)}</span></span>
-                <span class="text-green-300">TP2: <span class="font-mono">${formatPrice(setup.tp2, setup.pair)}</span></span>
-                <span class="text-gray-500">R:R: <span class="font-mono">${setup.rr1 ?? '—'}</span></span>
-            </div>
-            <div class="mt-2">
-                <div class="strength-bar">
-                    <div class="strength-fill ${setup.direction === 'BUY' ? 'buy' : 'sell'}" style="width: ${setup.score}%"></div>
+                <div class="text-right">
+                    <div class="text-sm font-bold font-mono ${cls === 'buy' ? 'text-green-400' : 'text-red-400'}">${s.score}</div>
+                    <div class="text-[10px] text-gray-500">${s.confidence} · ${s.timing}</div>
                 </div>
-                <div class="flex justify-between text-[9px] text-gray-600 mt-0.5">
-                    <span>Unified Score: ${setup.score}/100</span>
-                </div>
-            </div>
-        </div>
-    `).join('');
+            </div>`;
+    }).join('');
 }
 
-// ── New Unified Signal Matrix ─────────────────────────────────
+async function refreshSignalMatrix() {
+    const result = await apiFetch('/api/signals/unified');
+    if (result.status !== 'ok' || !result.data) return;
 
-async function refreshUnifiedMatrix() {
     const tbody = document.getElementById('unified-signal-body');
     if (!tbody) return;
 
-    const data = await fetchAPI('/api/signals/unified');
-    if (data.status !== 'ok') {
-        tbody.innerHTML = `<tr><td colspan="11" class="text-center py-8 text-gray-600">Failed to load unified signals</td></tr>`;
-        return;
-    }
+    const data = result.data;
+    tbody.innerHTML = Object.keys(data).map(pair => {
+        const sig = data[pair];
+        const unified = sig.unified || {};
+        const tech = sig.technical_signal || {};
+        const news = sig.news_signal || {};
+        const components = unified.components || {};
 
-    const signals = data.data;
-    const pairs = Object.keys(signals);
+        const dir = signalClass(unified.direction);
+        const price = sig.current_price;
 
-    if (pairs.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="11" class="text-center py-8 text-gray-600">No unified signal data available</td></tr>`;
-        return;
-    }
-
-    tbody.innerHTML = pairs.map(pair => {
-        const s = signals[pair];
-        if (!s || s.error) {
-            return `<tr class="border-b border-dark-700/30">
-                <td class="py-2.5 px-2 font-medium text-gray-400">${pair}</td>
-                <td colspan="10" class="py-2.5 px-2 text-center text-gray-600">Error: ${s?.error || 'No data'}</td>
+        return `
+            <tr class="border-b border-dark-700/20 hover:bg-dark-800/30 transition-colors fade-in">
+                <td class="py-2.5 px-2">
+                    <span class="font-semibold text-white">${pair.slice(0, 3)}/<span class="text-gray-400">${pair.slice(3)}</span></span>
+                    <div class="text-[9px] text-gray-600">${sig.type || ''}</div>
+                </td>
+                <td class="text-right py-2.5 px-2 font-mono text-sm text-gray-200">${formatPrice(price, pair)}</td>
+                <td class="text-center py-2.5 px-2">
+                    <div class="text-xs font-mono ${tech.score >= 60 ? 'text-green-400' : tech.score <= 40 ? 'text-red-400' : 'text-gray-400'}">${tech.score || 50}</div>
+                    ${components ? `<div class="w-full h-1 bg-dark-700 rounded mt-1"><div class="component-bar ${tech.score >= 60 ? 'buy' : tech.score <= 40 ? 'sell' : 'neutral'}" style="width:${tech.score || 50}%"></div></div>` : ''}
+                </td>
+                <td class="text-center py-2.5 px-2">${signalBadge(tech.direction)}</td>
+                <td class="text-center py-2.5 px-2">
+                    <div class="text-xs font-mono ${news.score >= 60 ? 'text-orange-400' : news.score <= 40 ? 'text-orange-400' : 'text-gray-400'}">${news.score || 50}</div>
+                </td>
+                <td class="text-center py-2.5 px-2">${signalBadge(news.direction)}</td>
+                <td class="text-center py-2.5 px-2">
+                    <div class="flex items-center justify-center gap-1.5">
+                        ${signalBadge(unified.direction)}
+                        <span class="text-[9px] ${unified.confidence === 'HIGH' ? 'text-green-400' : unified.confidence === 'MEDIUM' ? 'text-yellow-400' : 'text-gray-500'}">${unified.confidence || ''}</span>
+                    </div>
+                </td>
+                <td class="text-right py-2.5 px-2 font-mono text-xs text-yellow-400">${formatPrice(sig.entry_price, pair)}</td>
+                <td class="text-right py-2.5 px-2 font-mono text-xs text-red-400">${formatPrice(sig.stop_loss, pair)}</td>
+                <td class="text-right py-2.5 px-2 font-mono text-xs text-green-400">${formatPrice(sig.take_profit_1, pair)}</td>
+                <td class="text-center py-2.5 px-2">
+                    <span class="text-[9px] px-1.5 py-0.5 rounded ${sig.timing === 'IMMEDIATE' ? 'bg-green-500/20 text-green-400' : sig.timing === 'SOON' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-500/20 text-gray-400'}">${sig.timing || 'WAIT'}</span>
+                </td>
             </tr>`;
-        }
+    }).join('');
+}
 
-        const tech = s.technical_signal || {};
-        const newsSig = s.news_signal || {};
-        const unified = s.unified || {};
+async function refreshNewsPreview() {
+    const result = await apiFetch('/api/news/upcoming?hours=48');
+    if (result.status !== 'ok' || !result.data) return;
 
-        const techScore = tech.score ?? 50;
-        const techDir = tech.direction || 'NEUTRAL';
-        const newsScore = newsSig.score ?? 50;
-        const newsDir = newsSig.direction || 'NEUTRAL';
-        const uniDir = unified.direction || 'NEUTRAL';
+    const container = document.getElementById('news-preview');
+    if (!container) return;
 
-        return `<tr class="border-b border-dark-700/30 fade-in">
-            <td class="py-2.5 px-2">
-                <div class="flex items-center gap-2">
-                    <span class="font-medium text-white">${pair}</span>
-                    <span class="text-[9px] text-gray-600">${s.type || ''}</span>
+    const events = result.data.slice(0, 5);
+    if (events.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-4 text-gray-600 text-xs">
+                No upcoming events in the next 48 hours
+            </div>`;
+        return;
+    }
+
+    container.innerHTML = events.map((e, i) => {
+        const isHigh = e.impact && (e.impact.toLowerCase().includes('high') || e.impact.toLowerCase().includes('red'));
+        const impactClass = isHigh ? 'impact-high' : 'impact-medium';
+        return `
+            <div class="p-2.5 rounded-lg ${impactClass} mb-1.5 fade-in" style="animation-delay: ${i * 80}ms">
+                <div class="flex items-center justify-between">
+                    <span class="text-[10px] font-semibold ${isHigh ? 'text-red-400' : 'text-orange-400'}">${e.currency || ''}</span>
+                    <span class="text-[9px] text-gray-500">${e.datetime ? e.datetime.split(' ')[1] : ''}</span>
                 </div>
-            </td>
-            <td class="py-2.5 px-2 text-right font-mono text-gray-300">${formatPrice(s.current_price, pair)}</td>
-
-            <!-- Technical Score + Dir -->
-            <td class="py-2.5 px-2 text-center">
-                <div class="flex items-center justify-center gap-1">
-                    <div class="strength-bar w-12">
-                        <div class="strength-fill ${techDir === 'BUY' ? 'buy' : techDir === 'SELL' ? 'sell' : ''}" style="width: ${techScore}%"></div>
-                    </div>
-                    <span class="font-mono text-[10px] ${techScore >= 60 ? 'text-green-400' : techScore <= 40 ? 'text-red-400' : 'text-gray-400'}">${techScore}</span>
+                <div class="text-xs text-gray-300 mt-0.5">${e.event || ''}</div>
+                <div class="flex items-center gap-2 mt-1 text-[9px] text-gray-500">
+                    <span>F: ${e.forecast || '—'}</span>
+                    <span>P: ${e.previous || '—'}</span>
+                    ${signalBadge(e.direction, e.direction)}
                 </div>
-            </td>
-            <td class="py-2.5 px-2 text-center">
-                <span class="text-[9px] px-1.5 py-0.5 rounded font-semibold ${getDirectionClass(techDir)}">${getDirectionText(techDir)}</span>
-            </td>
-
-            <!-- News Score + Dir -->
-            <td class="py-2.5 px-2 text-center">
-                <div class="flex items-center justify-center gap-1">
-                    <div class="strength-bar w-12">
-                        <div class="strength-fill ${newsDir === 'BUY' ? 'buy' : newsDir === 'SELL' ? 'sell' : ''}" style="width: ${newsScore}%"></div>
-                    </div>
-                    <span class="font-mono text-[10px] ${newsScore >= 60 ? 'text-green-400' : newsScore <= 40 ? 'text-red-400' : 'text-gray-400'}">${newsScore}</span>
-                </div>
-            </td>
-            <td class="py-2.5 px-2 text-center">
-                <span class="text-[9px] px-1.5 py-0.5 rounded font-semibold ${getDirectionClass(newsDir)}">${getDirectionText(newsDir)}</span>
-            </td>
-
-            <!-- Unified Verdict -->
-            <td class="py-2.5 px-2 text-center">
-                <div class="flex flex-col items-center gap-0.5">
-                    <span class="text-[10px] px-2 py-0.5 rounded-full font-semibold ${getDirectionClass(uniDir)}">${getDirectionText(uniDir)}</span>
-                    <span class="text-[8px] ${unified.confidence === 'HIGH' ? 'text-green-500' : unified.confidence === 'MEDIUM' ? 'text-yellow-500' : 'text-gray-500'}">${unified.confidence || ''}</span>
-                    <span class="text-[8px] text-gray-600">${unified.agreement || ''}</span>
-                </div>
-            </td>
-
-            <td class="py-2.5 px-2 text-right font-mono text-gray-300">${formatPrice(s.entry_price, pair)}</td>
-            <td class="py-2.5 px-2 text-right font-mono text-red-400">${formatPrice(s.stop_loss, pair)}</td>
-            <td class="py-2.5 px-2 text-right font-mono text-green-400">${formatPrice(s.take_profit_1, pair)}</td>
-            <td class="py-2.5 px-2 text-center">
-                <span class="text-[10px] px-1.5 py-0.5 rounded ${
-                    s.timing === 'IMMEDIATE' ? 'bg-yellow-500/15 text-yellow-400 font-semibold' :
-                    s.timing === 'SOON' ? 'bg-blue-500/15 text-blue-400' :
-                    'bg-gray-500/15 text-gray-500'
-                }">${s.timing || '—'}</span>
-            </td>
-        </tr>`;
+            </div>`;
     }).join('');
 }
 
 async function refreshRegime() {
-    const content = document.getElementById('regime-content');
-    if (!content) return;
+    const result = await apiFetch('/api/analysis/regime');
+    if (result.status !== 'ok' || !result.data) return;
 
-    const data = await fetchAPI('/api/analysis/regime');
-    if (data.status !== 'ok') return;
+    const container = document.getElementById('regime-content');
+    if (!container) return;
 
-    const regime = data.data;
-    const colors = { 'RISK-ON': 'green', 'NEUTRAL': 'yellow', 'DEFENSIVE': 'red' };
-    const color = colors[regime.regime] || 'gray';
+    const r = result.data;
+    const regimeColor = r.regime_color === 'green' ? 'text-green-400' : r.regime_color === 'red' ? 'text-red-400' : 'text-yellow-400';
+    const bgColor = r.regime_color === 'green' ? 'bg-green-500/10 border-green-500/30' : r.regime_color === 'red' ? 'bg-red-500/10 border-red-500/30' : 'bg-yellow-500/10 border-yellow-500/30';
 
-    content.innerHTML = `
-        <div class="text-center p-4 rounded-lg bg-dark-800/50 border border-${color}-500/20">
-            <div class="text-2xl font-bold text-${color}-400 mb-1">${regime.regime}</div>
-            <div class="text-[10px] text-gray-500">Current Market Regime</div>
-        </div>
-        <div class="grid grid-cols-3 gap-2 text-center">
-            <div class="p-2 rounded-lg bg-dark-800/50">
-                <div class="text-xs font-mono text-gray-300">${regime.vix ? regime.vix.toFixed(1) : '—'}</div>
-                <div class="text-[9px] text-gray-600">VIX</div>
+    container.innerHTML = `
+        <div class="p-3 rounded-lg ${bgColor} border">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold ${regimeColor}">${r.regime || 'NEUTRAL'}</span>
+                <span class="text-[10px] text-gray-500">VIX: ${r.vix?.toFixed(1) || '—'}</span>
             </div>
-            <div class="p-2 rounded-lg bg-dark-800/50">
-                <div class="text-xs font-mono text-gray-300">${regime.dxy_value ? regime.dxy_value.toFixed(2) : '—'}</div>
-                <div class="text-[9px] text-gray-600">DXY</div>
-            </div>
-            <div class="p-2 rounded-lg bg-dark-800/50">
-                <div class="text-xs font-mono ${regime.yield_spread && regime.yield_spread < 0 ? 'text-red-400' : 'text-green-400'}">
-                    ${regime.yield_spread ? regime.yield_spread.toFixed(2) : '—'}
-                </div>
-                <div class="text-[9px] text-gray-600">2Y-10Y</div>
+            <div class="flex justify-between mt-2 text-[10px] text-gray-500">
+                <span>DXY: ${r.dxy_value?.toFixed(2) || '—'}</span>
+                <span>Yield: ${r.yield_spread?.toFixed(3) || '—'}</span>
             </div>
         </div>
-        ${(regime.signals || []).slice(0, 2).map(s => `
-            <div class="p-2 rounded-lg text-[10px] ${
-                s.type === 'risk_off' ? 'bg-red-500/5 border-l-2 border-red-500' :
-                s.type === 'risk_on' ? 'bg-green-500/5 border-l-2 border-green-500' :
-                'bg-yellow-500/5 border-l-2 border-yellow-500'
-            }">
-                <span class="text-gray-400">${s.message}</span>
+        ${(r.signals || []).slice(0, 2).map(s => `
+            <div class="flex items-start gap-2 text-xs text-gray-400 p-2 rounded-lg bg-dark-800/30">
+                <span class="text-[9px] px-1.5 py-0.5 rounded ${s.severity === 'high' || s.severity === 'extreme' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'}">${s.type}</span>
+                <span>${s.message}</span>
             </div>
         `).join('')}
     `;
 }
 
-async function refreshCrossAssetSnapshot() {
+async function refreshCrossAsset() {
+    const result = await apiFetch('/api/analysis/cross-asset');
+    if (result.status !== 'ok' || !result.data) return;
+
     const container = document.getElementById('cross-asset-snapshot');
     if (!container) return;
 
-    const data = await fetchAPI('/api/analysis/cross-asset');
-    if (data.status !== 'ok') return;
-
-    const analysis = data.data;
-    const items = [];
-
-    if (analysis.dxy && analysis.dxy.value) {
-        items.push({
-            name: 'DXY',
-            value: analysis.dxy.value.toFixed(2),
-            change: analysis.dxy.change,
-            trend: analysis.dxy.trend,
-        });
-    }
-    if (analysis.vix && analysis.vix.value) {
-        items.push({
-            name: 'VIX',
-            value: analysis.vix.value.toFixed(2),
-            change: analysis.vix.change,
-            regime: analysis.vix.regime,
-        });
-    }
-    if (analysis.yields && analysis.yields['10y_yield']) {
-        items.push({
-            name: 'US10Y',
-            value: `${analysis.yields['10y_yield'].toFixed(2)}%`,
-            spread: analysis.yields.spread_2_10,
-            inverted: analysis.yields.inverted,
-        });
-    }
-
-    if (items.length === 0) {
-        container.innerHTML = `<div class="text-center py-6 text-gray-600 text-xs">Cross-asset data loading...</div>`;
-        return;
-    }
+    const d = result.data;
+    const items = [
+        { label: 'DXY', value: d.dxy?.value, change: d.dxy?.change, color: d.dxy?.change >= 0 ? 'text-green-400' : 'text-red-400' },
+        { label: 'VIX', value: d.vix?.value, change: d.vix?.change, color: d.vix?.change >= 0 ? 'text-red-400' : 'text-green-400' },
+        { label: '10Y', value: d.yields?.['10y_yield'], change: null, color: 'text-blue-400' },
+        { label: '2/10', value: d.yields?.spread_2_10, change: null, color: d.yields?.spread_2_10 < 0 ? 'text-red-400' : 'text-green-400' },
+    ];
 
     container.innerHTML = items.map(item => `
-        <div class="flex items-center justify-between p-2.5 rounded-lg bg-dark-800/30 text-xs">
-            <span class="font-medium text-gray-300">${item.name}</span>
+        <div class="flex items-center justify-between p-2 rounded-lg bg-dark-800/30">
+            <span class="text-xs text-gray-500">${item.label}</span>
             <div class="text-right">
-                <div class="font-mono text-gray-200">${item.value}</div>
-                ${item.change !== undefined ? `
-                    <div class="text-[10px] font-mono ${item.change >= 0 ? 'text-green-400' : 'text-red-400'}">
-                        ${formatChange(item.change)}
-                    </div>
-                ` : ''}
-                ${item.inverted !== undefined ? `
-                    <div class="text-[10px] ${item.inverted ? 'text-red-400' : 'text-green-400'}">
-                        ${item.inverted ? '⚠️ Inverted' : 'Normal'}
-                    </div>
-                ` : ''}
-                ${item.regime ? `
-                    <div class="text-[10px] text-gray-500">${item.regime}</div>
-                ` : ''}
+                <span class="text-xs font-mono font-semibold ${item.color}">${item.value?.toFixed(2) || '—'}</span>
+                ${item.change !== null ? `<span class="text-[9px] ml-1 ${item.color}">${item.change >= 0 ? '+' : ''}${item.change.toFixed(2)}%</span>` : ''}
             </div>
         </div>
     `).join('');
 }
 
-async function refreshNewsPreview() {
-    const container = document.getElementById('news-preview');
-    if (!container) return;
-
-    const data = await fetchAPI('/api/news/upcoming?hours=48');
-    if (data.status !== 'ok') return;
-
-    const events = (data.data || []).slice(0, 4);
-
-    if (events.length === 0) {
-        container.innerHTML = `<div class="text-center py-6 text-gray-600 text-xs">No upcoming events in 48h</div>`;
-        return;
-    }
-
-    container.innerHTML = events.map(event => `
-        <div class="p-2.5 rounded-lg ${event.impact && event.impact.includes('High') ? 'impact-red' : 'impact-orange'} mb-2 text-xs">
-            <div class="flex items-center justify-between mb-1">
-                <span class="font-medium text-gray-300">${event.event}</span>
-                <span class="text-[9px] px-1 py-0.5 rounded ${
-                    event.direction === 'bullish' ? 'bg-green-500/10 text-green-400' :
-                    event.direction === 'bearish' ? 'bg-red-500/10 text-red-400' :
-                    'bg-gray-500/10 text-gray-400'
-                }">${event.direction ? event.direction.toUpperCase() : '—'}</span>
-            </div>
-            <div class="flex justify-between text-[10px] text-gray-500">
-                <span>${event.currency} · ${event.datetime}</span>
-                <span>${event.impact}</span>
-            </div>
-        </div>
-    `).join('');
-}
-
-// ── Signals Page ────────────────────────────────────────────────
+// ── Signals Page Functions ──────────────────────────────────────────
 
 async function refreshSignals() {
-    const container = document.getElementById('signal-detail-container');
-    const summaryEl = document.getElementById('signal-summary');
-    const srEl = document.getElementById('sr-quick-ref');
-    if (!container) return;
-
-    const data = await fetchAPI('/api/signals/unified');
-    if (data.status !== 'ok') {
-        container.innerHTML = `<div class="text-center py-8 text-gray-600">Failed to load signals</div>`;
-        return;
-    }
-
-    const signals = data.data;
     const filter = document.getElementById('pair-filter');
     const selected = filter ? filter.value : 'all';
+    const container = document.getElementById('signal-detail-container');
+    if (!container) return;
 
-    const entries = Object.entries(signals);
-    const filtered = selected === 'all'
-        ? entries
-        : entries.filter(([k]) => k === selected);
+    const result = selected === 'all'
+        ? await apiFetch('/api/signals/unified')
+        : await apiFetch(`/api/signals/unified/${selected}`);
 
-    if (filtered.length === 0) {
-        container.innerHTML = `<div class="text-center py-8 text-gray-600">No signals available${selected !== 'all' ? ` for ${selected}` : ''}</div>`;
+    if (result.status !== 'ok') {
+        container.innerHTML = `<div class="text-center py-8 text-red-400">Error: ${result.message}</div>`;
         return;
     }
 
-    // Render detailed unified signal cards
-    container.innerHTML = filtered.map(([pair, signal]) => {
-        if (!signal || signal.error) {
-            return `<div class="text-center py-4 text-gray-600">Error loading ${pair}</div>`;
-        }
+    if (selected === 'all') {
+        // Show all pairs as expandable cards
+        const data = result.data;
+        container.innerHTML = Object.keys(data).map(pair => buildSignalCard(pair, data[pair])).join('');
+        // Update S/R quick ref
+        updateSRQuickRef(null);
+    } else {
+        const data = result.data;
+        container.innerHTML = buildSignalCard(selected, data);
+        updateSRQuickRef(data);
+    }
 
-        const tech = signal.technical_signal || {};
-        const newsSig = signal.news_signal || {};
-        const unified = signal.unified || {};
-        const techDetails = tech.indicators || [];
-        const topEvents = newsSig.top_events || [];
+    // Update summary
+    await refreshSignalSummary();
+}
 
-        return `
-        <div class="p-4 rounded-xl bg-dark-800/50 border border-dark-700/50 mb-3 fade-in">
-            <!-- Signal Header -->
-            <div class="flex items-center justify-between mb-4">
+function buildSignalCard(pair, sig) {
+    const unified = sig.unified || {};
+    const tech = sig.technical_signal || {};
+    const news = sig.news_signal || {};
+    const tick = sig.tick_signal || {};
+    const cme = sig.cme_signal || {};
+    const social = sig.social_signal || {};
+    const components = unified.components || {};
+
+    const dir = signalClass(unified.direction);
+    const conf = unified.confidence || 'LOW';
+
+    return `
+        <div class="bg-dark-800/40 border border-dark-700/30 rounded-lg p-4 mb-3 fade-in signal-card" data-pair="${pair}">
+            <div class="flex items-center justify-between mb-3">
                 <div class="flex items-center gap-3">
-                    <div class="w-8 h-8 rounded-lg ${getDirectionClass(unified.direction)} flex items-center justify-center text-xs font-bold">
-                        ${unified.direction === 'BUY' ? '↑' : unified.direction === 'SELL' ? '↓' : '—'}
+                    <div class="w-10 h-10 rounded-xl ${dir === 'buy' ? 'bg-green-500/20' : dir === 'sell' ? 'bg-red-500/20' : 'bg-gray-500/20'} flex items-center justify-center">
+                        <span class="text-lg font-bold ${dir === 'buy' ? 'text-green-400' : dir === 'sell' ? 'text-red-400' : 'text-gray-400'}">${unified.direction === 'BUY' ? '↑' : unified.direction === 'SELL' ? '↓' : '→'}</span>
                     </div>
                     <div>
-                        <h4 class="text-sm font-semibold text-white">${signal.pair_name}</h4>
-                        <span class="text-[10px] text-gray-500">${signal.type || ''}</span>
+                        <h4 class="text-sm font-bold text-white">${pair.slice(0, 3)}/<span class="text-gray-400">${pair.slice(3)}</span></h4>
+                        <div class="flex items-center gap-2 mt-0.5">
+                            ${signalBadge(unified.direction)}
+                            <span class="text-[10px] ${conf === 'HIGH' ? 'text-green-400' : conf === 'MEDIUM' ? 'text-yellow-400' : 'text-gray-500'}">${conf}</span>
+                            <span class="text-[10px] text-gray-600">${unified.agreement || ''}</span>
+                        </div>
                     </div>
                 </div>
                 <div class="text-right">
-                    <div class="text-lg font-bold text-white font-mono">${formatPrice(signal.current_price, pair)}</div>
-                    <div class="text-[10px] font-mono ${signal.price_change_24h >= 0 ? 'text-green-400' : 'text-red-400'}">
-                        24h: ${formatChange(signal.price_change_24h)}
-                    </div>
+                    <div class="text-lg font-bold font-mono ${dir === 'buy' ? 'text-green-400' : dir === 'sell' ? 'text-red-400' : 'text-gray-400'}">${unified.score || 50}</div>
+                    <div class="text-[9px] text-gray-600">Unified Score</div>
                 </div>
             </div>
 
-            <!-- Verdict Banner -->
-            <div class="mb-3 p-2 rounded-lg ${getDirectionClass(unified.direction)} text-center text-[11px]">
-                <span class="font-semibold">${unified.verdict || ''}</span>
-                <span class="ml-2 text-[9px] ${unified.confidence === 'HIGH' ? 'text-green-400' : unified.confidence === 'MEDIUM' ? 'text-yellow-400' : 'text-gray-400'}">
-                    [${unified.confidence || 'LOW'} confidence]
-                </span>
-            </div>
-
-            <!-- Entry/SL/TP Grid -->
-            <div class="grid grid-cols-5 gap-2 mb-4">
-                <div class="p-2 rounded-lg bg-dark-900/50 text-center">
-                    <div class="text-[9px] text-gray-600 mb-1">Entry</div>
-                    <div class="text-xs font-mono text-white font-semibold">${formatPrice(signal.entry_price, pair)}</div>
-                </div>
-                <div class="p-2 rounded-lg bg-dark-900/50 text-center">
-                    <div class="text-[9px] text-gray-600 mb-1">Stop Loss</div>
-                    <div class="text-xs font-mono text-red-400">${formatPrice(signal.stop_loss, pair)}</div>
-                </div>
-                <div class="p-2 rounded-lg bg-dark-900/50 text-center">
-                    <div class="text-[9px] text-gray-600 mb-1">TP1 🎯</div>
-                    <div class="text-xs font-mono text-green-400">${formatPrice(signal.take_profit_1, pair)}</div>
-                </div>
-                <div class="p-2 rounded-lg bg-dark-900/50 text-center">
-                    <div class="text-[9px] text-gray-600 mb-1">TP2 🎯</div>
-                    <div class="text-xs font-mono text-green-300">${formatPrice(signal.take_profit_2, pair)}</div>
-                </div>
-                <div class="p-2 rounded-lg bg-dark-900/50 text-center">
-                    <div class="text-[9px] text-gray-600 mb-1">R:R</div>
-                    <div class="text-xs font-mono text-yellow-400">1:${signal.risk_reward_1?.toFixed(1) || '—'}</div>
-                </div>
-            </div>
-
-            <!-- Two-column: Technical + News -->
-            <div class="grid grid-cols-2 gap-3 mb-3">
-                <!-- Technical Column -->
-                <div class="p-3 rounded-lg bg-dark-900/50">
-                    <div class="flex items-center gap-2 mb-2">
-                        <span class="text-blue-400 text-xs font-semibold">📊 Technical</span>
-                        <span class="text-[10px] font-mono ${tech.score >= 60 ? 'text-green-400' : tech.score <= 40 ? 'text-red-400' : 'text-gray-400'}">
-                            Score: ${tech.score ?? '—'}/100
-                        </span>
-                        <span class="text-[9px] px-1.5 py-0.5 rounded ${getDirectionClass(tech.direction)}">
-                            ${getDirectionText(tech.direction)}
-                        </span>
-                    </div>
-                    <div class="space-y-1">
-                        ${techDetails.map(ind => `
-                            <div class="flex items-center gap-2 text-[10px]">
-                                <span class="w-1.5 h-1.5 rounded-full ${
-                                    ind.signal && ind.signal.includes('BUY') ? 'bg-green-400' :
-                                    ind.signal && ind.signal.includes('SELL') ? 'bg-red-400' :
-                                    'bg-gray-500'
-                                }"></span>
-                                <span class="text-gray-400">${ind.indicator || ''}</span>
-                                <span class="text-gray-500">${ind.reason || ''}</span>
+            <!-- Component Breakdown -->
+            <div class="grid grid-cols-5 gap-2 mb-3">
+                ${[
+                    { label: 'Tech', score: components.technical || tech.score || 50 },
+                    { label: 'News', score: components.news || news.score || 50 },
+                    { label: 'Tick', score: components.tick || tick.score || 50 },
+                    { label: 'CME', score: components.cme || cme.score || 50 },
+                    { label: 'Social', score: components.social || social.score || 50 },
+                ].map(c => {
+                    const cDir = c.score >= 60 ? 'buy' : c.score <= 40 ? 'sell' : 'neutral';
+                    return `
+                        <div class="text-center">
+                            <div class="text-[9px] text-gray-500 mb-1">${c.label}</div>
+                            <div class="text-xs font-mono font-semibold ${cDir === 'buy' ? 'text-green-400' : cDir === 'sell' ? 'text-red-400' : 'text-gray-400'}">${Math.round(c.score)}</div>
+                            <div class="w-full h-1 bg-dark-700 rounded mt-1">
+                                <div class="component-bar ${cDir}" style="width: ${c.score}%"></div>
                             </div>
-                        `).join('') || '<div class="text-[10px] text-gray-600">No technical indicators available</div>'}
-                    </div>
-                    ${tech.summary && tech.summary.rsi ? `
-                        <div class="mt-2 pt-2 border-t border-dark-700/30 text-[9px] text-gray-600">
-                            RSI: ${tech.summary.rsi}
-                        </div>
-                    ` : ''}
-                </div>
+                        </div>`;
+                }).join('')}
+            </div>
 
-                <!-- News Column -->
-                <div class="p-3 rounded-lg bg-dark-900/50">
-                    <div class="flex items-center gap-2 mb-2">
-                        <span class="text-yellow-400 text-xs font-semibold">📰 News</span>
-                        <span class="text-[10px] font-mono ${newsSig.score >= 60 ? 'text-green-400' : newsSig.score <= 40 ? 'text-red-400' : 'text-gray-400'}">
-                            Score: ${newsSig.score ?? '—'}/100
-                        </span>
-                        <span class="text-[9px] px-1.5 py-0.5 rounded ${getDirectionClass(newsSig.direction)}">
-                            ${getDirectionText(newsSig.direction)}
-                        </span>
-                    </div>
-                    <div class="space-y-1">
-                        ${topEvents.map(evt => `
-                            <div class="p-1.5 rounded text-[10px] ${evt.impact && evt.impact.includes('High') ? 'bg-red-500/5 border-l-2 border-red-500' : 'bg-orange-500/5 border-l-2 border-orange-500'}">
-                                <div class="flex items-center justify-between">
-                                    <span class="text-gray-300 truncate">${evt.event || ''}</span>
-                                    <span class="text-[8px] ${evt.direction === 'bullish' ? 'text-green-400' : evt.direction === 'bearish' ? 'text-red-400' : 'text-gray-500'}">
-                                        ${(evt.direction || '').toUpperCase()}
-                                    </span>
-                                </div>
-                                <div class="text-gray-600 text-[8px]">${evt.currency || ''} · ${evt.datetime || ''}</div>
-                            </div>
-                        `).join('') || `<div class="text-[10px] text-gray-600">${newsSig.note || 'No news events'}</div>`}
-                    </div>
-                    <div class="mt-2 text-[9px] text-gray-600">
-                        ${newsSig.events_analyzed || 0} events analyzed
-                    </div>
+            <!-- Levels -->
+            <div class="grid grid-cols-4 gap-3 p-3 rounded-lg bg-dark-900/50">
+                <div>
+                    <div class="text-[9px] text-gray-600">Entry</div>
+                    <div class="text-xs font-mono text-yellow-400 font-semibold">${formatPrice(sig.entry_price, pair)}</div>
+                </div>
+                <div>
+                    <div class="text-[9px] text-gray-600">Stop Loss</div>
+                    <div class="text-xs font-mono text-red-400 font-semibold">${formatPrice(sig.stop_loss, pair)}</div>
+                </div>
+                <div>
+                    <div class="text-[9px] text-gray-600">TP1</div>
+                    <div class="text-xs font-mono text-green-400 font-semibold">${formatPrice(sig.take_profit_1, pair)}</div>
+                </div>
+                <div>
+                    <div class="text-[9px] text-gray-600">R:R</div>
+                    <div class="text-xs font-mono text-gray-300 font-semibold">1:${sig.risk_reward_1?.toFixed(1) || '—'}</div>
                 </div>
             </div>
 
-            <!-- Unified Score Bar -->
-            <div class="strength-bar">
-                <div class="strength-fill ${unified.direction === 'BUY' ? 'buy' : 'sell'}" style="width: ${unified.score || 50}%"></div>
-            </div>
-            <div class="flex justify-between mt-1 text-[9px] text-gray-600">
-                <span>Unified Score: ${unified.score || 50}/100 · ${unified.agreement || ''}</span>
-                <span>Timing: ${signal.timing || '—'}</span>
-            </div>
+            <!-- CME Levels -->
+            ${sig.cme_levels ? `
+            <div class="flex gap-3 mt-2 text-[10px] text-gray-500">
+                <span>Max Pain: <span class="font-mono text-gray-400">${formatPrice(sig.cme_levels.max_pain, pair)}</span></span>
+                <span>R1: <span class="font-mono text-red-400">${formatPrice(sig.cme_levels.primary_resistance, pair)}</span></span>
+                <span>S1: <span class="font-mono text-green-400">${formatPrice(sig.cme_levels.primary_support, pair)}</span></span>
+            </div>` : ''}
+
+            <!-- Verdict -->
+            <div class="mt-2 text-xs text-gray-500 italic">${unified.verdict || ''}</div>
         </div>`;
-    }).join('');
-
-    // Update summary
-    if (summaryEl) {
-        const buyCount = Object.values(signals).filter(s => s?.unified?.direction === 'BUY').length;
-        const sellCount = Object.values(signals).filter(s => s?.unified?.direction === 'SELL').length;
-        const neutralCount = Object.values(signals).filter(s => !s?.unified?.direction || s.unified.direction === 'NEUTRAL').length;
-
-        summaryEl.innerHTML = `
-            <div class="grid grid-cols-2 gap-2">
-                <div class="p-2.5 rounded-lg bg-green-500/5 text-center">
-                    <div class="text-lg font-bold text-green-400">${buyCount}</div>
-                    <div class="text-[9px] text-gray-500">BUY</div>
-                </div>
-                <div class="p-2.5 rounded-lg bg-red-500/5 text-center">
-                    <div class="text-lg font-bold text-red-400">${sellCount}</div>
-                    <div class="text-[9px] text-gray-500">SELL</div>
-                </div>
-            </div>
-            <div class="mt-2 p-2 rounded-lg bg-dark-800/50 text-center">
-                <div class="text-xs text-gray-400">${neutralCount} Neutral</div>
-            </div>
-        `;
-    }
-
-    // Update S/R quick reference
-    if (srEl) {
-        const firstSignal = filtered[0]?.[1];
-        if (firstSignal && firstSignal.support_levels) {
-            srEl.innerHTML = `
-                <h3 class="text-sm font-semibold text-white mb-3">S/R: ${firstSignal.pair}</h3>
-                <div class="space-y-2 text-xs">
-                    <div>
-                        <div class="text-gray-500 mb-1">Resistance</div>
-                        ${(firstSignal.resistance_levels || []).map(r => `
-                            <div class="flex items-center gap-2 p-1.5">
-                                <div class="w-8 h-0.5 rounded bg-red-500/50"></div>
-                                <span class="font-mono text-red-400">${r}</span>
-                            </div>
-                        `).join('') || '<div class="text-gray-600">—</div>'}
-                    </div>
-                    <div>
-                        <div class="text-gray-500 mb-1">Support</div>
-                        ${(firstSignal.support_levels || []).map(s => `
-                            <div class="flex items-center gap-2 p-1.5">
-                                <div class="w-8 h-0.5 rounded bg-green-500/50"></div>
-                                <span class="font-mono text-green-400">${s}</span>
-                            </div>
-                        `).join('') || '<div class="text-gray-600">—</div>'}
-                    </div>
-                </div>
-            `;
-        }
-    }
 }
 
-// ── News Page ────────────────────────────────────────────────────
-
-async function refreshNews() {
-    const container = document.getElementById('news-container');
-    const statsEl = document.getElementById('news-stats');
+function updateSRQuickRef(signalData) {
+    const container = document.getElementById('sr-quick-ref');
     if (!container) return;
 
-    const hours = parseInt(document.querySelector('.time-tab.active')?.dataset?.hours || '72');
-    const currencyFilter = document.getElementById('currency-filter')?.value || 'all';
-    const impactFilter = document.getElementById('impact-filter')?.value || 'all';
-
-    const data = await fetchAPI(`/api/news/upcoming?hours=${hours}`);
-    if (data.status !== 'ok') {
-        container.innerHTML = `<div class="text-center py-8 text-gray-600">Failed to load news data</div>`;
+    if (!signalData || !signalData.support_levels || !signalData.resistance_levels) {
+        container.innerHTML = `
+            <h3 class="text-sm font-semibold text-white mb-3">S/R Levels</h3>
+            <div class="text-xs text-gray-500 text-center py-4">
+                Select a signal to view support & resistance
+            </div>`;
         return;
     }
 
-    let events = data.data || [];
-
-    // Apply filters
-    if (currencyFilter !== 'all') {
-        events = events.filter(e => e.currency === currencyFilter);
-    }
-    if (impactFilter === 'High') {
-        events = events.filter(e => e.impact && e.impact.includes('High'));
-    } else if (impactFilter === 'Medium') {
-        events = events.filter(e => e.impact && e.impact.includes('Medium'));
-    }
-
-    if (events.length === 0) {
-        container.innerHTML = `<div class="text-center py-12 text-gray-600">
-            <div class="text-2xl mb-2">📅</div>
-            <div class="text-sm">No upcoming ${impactFilter !== 'all' ? impactFilter : ''} events found</div>
-            <div class="text-xs text-gray-600 mt-1">Try a wider time range or different filter</div>
+    container.innerHTML = `
+        <h3 class="text-sm font-semibold text-white mb-3">S/R Levels</h3>
+        <div class="space-y-2">
+            <div class="p-2 rounded-lg bg-red-500/5 border border-red-500/20">
+                <div class="text-[9px] text-red-400 mb-1">RESISTANCE</div>
+                ${(signalData.resistance_levels || []).map(l => `<div class="text-xs font-mono text-gray-300">${formatPrice(l, null)}</div>`).join('')}
+            </div>
+            <div class="p-2 rounded-lg bg-green-500/5 border border-green-500/20">
+                <div class="text-[9px] text-green-400 mb-1">SUPPORT</div>
+                ${(signalData.support_levels || []).map(l => `<div class="text-xs font-mono text-gray-300">${formatPrice(l, null)}</div>`).join('')}
+            </div>
         </div>`;
-        return;
-    }
+}
 
-    container.innerHTML = events.map(event => `
-        <div class="p-3 rounded-lg ${event.impact && event.impact.includes('High') ? 'impact-red' : 'impact-orange'} mb-2 fade-in">
-            <div class="flex items-start justify-between">
-                <div class="flex-1">
-                    <div class="flex items-center gap-2 mb-1">
-                        <span class="text-xs font-semibold text-gray-200">${event.event}</span>
-                        <span class="text-[9px] px-1.5 py-0.5 rounded ${
-                            event.impact && event.impact.includes('High') ? 'bg-red-500/20 text-red-400' : 'bg-orange-500/20 text-orange-400'
-                        }">${event.impact}</span>
-                    </div>
-                    <div class="flex items-center gap-3 text-[10px] text-gray-500 mb-1">
-                        <span>${event.currency}</span>
-                        <span>${event.datetime}</span>
-                        ${event.status === 'live' ? '<span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>LIVE</span>' : ''}
-                    </div>
-                </div>
-                <div class="text-right ml-3">
-                    ${event.direction ? `
-                        <span class="text-[10px] px-2 py-0.5 rounded-full font-semibold ${
-                            event.direction === 'bullish' ? 'badge-buy' :
-                            event.direction === 'bearish' ? 'badge-sell' : 'badge-neutral'
-                        }">${event.direction.toUpperCase()}</span>
-                    ` : ''}
-                </div>
+async function refreshSignalSummary() {
+    const container = document.getElementById('signal-summary');
+    if (!container) return;
+
+    const result = await apiFetch('/api/market/overview');
+    if (result.status !== 'ok' || !result.data) return;
+
+    const data = result.data;
+    let buyCount = 0, sellCount = 0, neutralCount = 0;
+
+    Object.values(data).forEach(item => {
+        if (item.direction === 'BUY') buyCount++;
+        else if (item.direction === 'SELL') sellCount++;
+        else neutralCount++;
+    });
+
+    container.innerHTML = `
+        <div class="p-3 rounded-lg bg-dark-800/30">
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-xs text-gray-400">Signal Distribution</span>
+                <span class="text-[10px] text-gray-600">${buyCount + sellCount + neutralCount} pairs</span>
             </div>
-
-            <!-- Forecast data -->
-            <div class="grid grid-cols-3 gap-2 mt-2 text-[10px]">
-                <div class="p-1.5 rounded bg-dark-800/50 text-center">
-                    <div class="text-gray-600">Previous</div>
-                    <div class="font-mono text-gray-300">${event.previous || '—'}</div>
+            <div class="flex gap-2">
+                <div class="flex-1 p-2 rounded bg-green-500/10 text-center">
+                    <div class="text-sm font-bold text-green-400">${buyCount}</div>
+                    <div class="text-[9px] text-green-500/70">BUY</div>
                 </div>
-                <div class="p-1.5 rounded bg-dark-800/50 text-center">
-                    <div class="text-gray-600">Forecast</div>
-                    <div class="font-mono text-gray-300">${event.forecast || '—'}</div>
+                <div class="flex-1 p-2 rounded bg-red-500/10 text-center">
+                    <div class="text-sm font-bold text-red-400">${sellCount}</div>
+                    <div class="text-[9px] text-red-500/70">SELL</div>
                 </div>
-                <div class="p-1.5 rounded bg-dark-800/50 text-center">
-                    <div class="text-gray-600">Actual</div>
-                    <div class="font-mono ${event.actual && event.actual !== '-' ? 'text-yellow-400' : 'text-gray-600'}">${event.actual || 'Pending'}</div>
+                <div class="flex-1 p-2 rounded bg-gray-500/10 text-center">
+                    <div class="text-sm font-bold text-gray-400">${neutralCount}</div>
+                    <div class="text-[9px] text-gray-500/70">HOLD</div>
                 </div>
-            </div>
-
-            <!-- Reasoning -->
-            ${event.reasoning ? `
-                <div class="mt-1.5 text-[9px] text-gray-600 italic">${event.reasoning}</div>
-            ` : ''}
-
-            <!-- Affected pairs -->
-            <div class="mt-1.5 flex gap-1">
-                ${(event.affected_pairs || []).map(p => `
-                    <span class="text-[8px] px-1.5 py-0.5 rounded bg-dark-800 text-gray-500">${p}</span>
-                `).join('')}
             </div>
         </div>
-    `).join('') || `<div class="text-center py-8 text-gray-600">No events found</div>`;
-
-    // Update stats
-    if (statsEl) {
-        const statsData = await fetchAPI('/api/news/summary');
-        if (statsData.status === 'ok') {
-            const stats = statsData.data;
-            statsEl.innerHTML = Object.entries(stats).map(([currency, info]) => `
-                <div class="p-2.5 rounded-lg bg-dark-800/30 flex items-center justify-between text-xs">
-                    <div>
-                        <span class="font-semibold text-gray-300">${currency}</span>
-                        <span class="text-gray-600 ml-1">${info.upcoming_24h} upcoming</span>
-                    </div>
-                    <div class="flex gap-2">
-                        <span class="text-red-400 font-mono">${info.high}h</span>
-                        <span class="text-orange-400 font-mono">${info.medium}m</span>
-                    </div>
-                </div>
-            `).join('');
-        }
-    }
+        <div class="p-3 rounded-lg bg-dark-800/30 mt-2">
+            <div class="text-xs text-gray-500 mb-1">Top Pick</div>
+            ${buyCount > sellCount
+                ? '<span class="text-xs text-green-400">Bullish bias — ' + buyCount + ' buy signals vs ' + sellCount + ' sell</span>'
+                : '<span class="text-xs text-red-400">Bearish bias — ' + sellCount + ' sell signals vs ' + buyCount + ' buy</span>'
+            }
+        </div>`;
 }
 
-// ── Analysis Page ────────────────────────────────────────────────
+// ── News Page Functions ──────────────────────────────────────────────
+
+async function refreshNews(hours) {
+    hours = hours || 72;
+    const result = await apiFetch(`/api/news/upcoming?hours=${hours}`);
+    if (result.status !== 'ok' || !result.data) return;
+
+    const container = document.getElementById('news-container');
+    if (!container) return;
+
+    const events = result.data;
+    const currencyFilter = document.getElementById('currency-filter');
+    const impactFilter = document.getElementById('impact-filter');
+    const selectedCurrency = currencyFilter ? currencyFilter.value : 'all';
+    const selectedImpact = impactFilter ? impactFilter.value : 'all';
+
+    let filtered = events;
+    if (selectedCurrency !== 'all') {
+        filtered = filtered.filter(e => e.currency === selectedCurrency);
+    }
+    if (selectedImpact !== 'all') {
+        filtered = filtered.filter(e => e.impact && e.impact.toLowerCase().includes(selectedImpact.toLowerCase()));
+    }
+
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div class="flex flex-col items-center justify-center py-12 text-gray-600">
+                <svg class="w-12 h-12 mb-3 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"/>
+                </svg>
+                <span class="text-sm">No events matching filters</span>
+            </div>`;
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="space-y-1">
+            ${filtered.map((e, i) => {
+                const isHigh = e.impact && (e.impact.toLowerCase().includes('high') || e.impact.toLowerCase().includes('red'));
+                const isLive = e.status === 'live';
+                return `
+                    <div class="flex items-center p-3 rounded-lg ${isHigh ? 'impact-high' : 'impact-medium'} fade-in" style="animation-delay: ${i * 30}ms">
+                        ${isLive ? '<span class="w-2 h-2 rounded-full bg-red-500 animate-pulse mr-2 flex-shrink-0"></span>' : ''}
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2">
+                                <span class="text-[10px] font-semibold ${isHigh ? 'text-red-400' : 'text-orange-400'}">${e.currency || ''}</span>
+                                <span class="text-[9px] text-gray-500">${e.datetime || ''}</span>
+                                <span class="text-[9px] text-gray-600">${e.impact || ''}</span>
+                            </div>
+                            <div class="text-sm text-gray-200 truncate">${e.event || ''}</div>
+                            <div class="flex items-center gap-3 mt-0.5 text-[10px] text-gray-500">
+                                ${e.forecast ? `<span>Fcast: ${e.forecast}</span>` : ''}
+                                ${e.previous ? `<span>Prev: ${e.previous}</span>` : ''}
+                                ${signalBadge(e.direction, e.direction)}
+                            </div>
+                        </div>
+                    </div>`;
+            }).join('')}
+        </div>`;
+}
+
+async function refreshNewsStats() {
+    const result = await apiFetch('/api/news/summary');
+    if (result.status !== 'ok' || !result.data) return;
+
+    const container = document.getElementById('news-stats');
+    if (!container) return;
+
+    container.innerHTML = Object.keys(result.data).map(currency => {
+        const stats = result.data[currency];
+        return `
+            <div class="flex items-center justify-between p-2.5 rounded-lg bg-dark-800/30">
+                <div class="flex items-center gap-2">
+                    <span class="w-6 h-4 rounded ${currency === 'USD' ? 'bg-blue-600' : currency === 'EUR' ? 'bg-orange-600' : 'bg-green-600'} text-center text-[9px] leading-4 font-bold text-white">${currency}</span>
+                    <span class="text-xs text-gray-400">${stats.total || 0} events</span>
+                </div>
+                <div class="flex gap-2 text-[10px]">
+                    <span class="text-red-400">${stats.high || 0}H</span>
+                    <span class="text-orange-400">${stats.medium || 0}M</span>
+                    <span class="text-blue-400">${stats.upcoming_24h || 0} upcoming</span>
+                </div>
+            </div>`;
+    }).join('');
+}
+
+// ── Analysis Page Functions ──────────────────────────────────────────
 
 async function refreshAnalysis() {
-    const data = await fetchAPI('/api/analysis/cross-asset');
-    const regimeData = await fetchAPI('/api/analysis/regime');
-
-    if (data.status !== 'ok' && regimeData.status !== 'ok') return;
-
-    const analysis = data.data || {};
-    const regime = regimeData.data || {};
-
-    // Regime Banner
-    const banner = document.getElementById('regime-banner');
-    if (banner && regime.regime) {
-        const colorMap = { 'RISK-ON': 'green', 'NEUTRAL': 'yellow', 'DEFENSIVE': 'red' };
-        const color = colorMap[regime.regime] || 'gray';
-        banner.innerHTML = `
-            <div class="flex items-center justify-between p-4 rounded-lg bg-${color}-500/5 border border-${color}-500/20">
-                <div>
-                    <div class="text-2xl font-bold text-${color}-400">${regime.regime}</div>
-                    <div class="text-xs text-gray-500">Current Market Regime Assessment</div>
-                </div>
-                <div class="text-right text-xs text-gray-500">
-                    Updated: ${analysis.timestamp || '—'}
-                </div>
-            </div>
-        `;
+    // Cross-asset analysis
+    const crossResult = await apiFetch('/api/analysis/cross-asset');
+    if (crossResult.status === 'ok' && crossResult.data) {
+        const d = crossResult.data;
+        updateElement('dxy-analysis', buildDXYAnalysis(d.dxy));
+        updateElement('vix-analysis', buildVIXAnalysis(d.vix));
+        updateElement('yield-analysis', buildYieldAnalysis(d.yields));
+        updateElement('correlation-matrix', buildCorrelationMatrix(d.correlations));
     }
 
-    // DXY Analysis
-    const dxyEl = document.getElementById('dxy-analysis');
-    if (dxyEl && analysis.dxy) {
-        const d = analysis.dxy;
-        dxyEl.innerHTML = `
-            <div class="grid grid-cols-2 gap-3">
-                <div class="p-3 rounded-lg bg-dark-800/50">
-                    <div class="text-2xl font-bold font-mono text-white">${d.value?.toFixed(2) || '—'}</div>
-                    <div class="text-xs ${d.change >= 0 ? 'text-green-400' : 'text-red-400'}">${formatChange(d.change)}</div>
-                </div>
-                <div class="p-3 rounded-lg bg-dark-800/50">
-                    <div class="text-sm text-gray-300">
-                        <span class="font-semibold capitalize">${d.trend}</span>
-                    </div>
-                    <div class="text-xs text-gray-600 capitalize mt-1">
-                        Dollar is <span class="${d.strength === 'very_strong' || d.strength === 'strong' ? 'text-green-400' : 'text-gray-400'}">${d.strength?.replace('_', ' ')}</span>
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-
-    // VIX Analysis
-    const vixEl = document.getElementById('vix-analysis');
-    if (vixEl && analysis.vix) {
-        const v = analysis.vix;
-        const regimeLabels = {
-            'extreme_fear': { label: 'Extreme Fear 🚨', color: 'red' },
-            'fear': { label: 'Fear ⚠️', color: 'yellow' },
-            'neutral': { label: 'Neutral ✅', color: 'blue' },
-            'complacency': { label: 'Complacency 😴', color: 'green' },
-        };
-        const regimeInfo = regimeLabels[v.regime] || { label: 'Unknown', color: 'gray' };
-        vixEl.innerHTML = `
-            <div class="grid grid-cols-2 gap-3">
-                <div class="p-3 rounded-lg bg-dark-800/50">
-                    <div class="text-2xl font-bold font-mono text-white">${v.value?.toFixed(2) || '—'}</div>
-                    <div class="text-xs text-${regimeInfo.color}-400 font-semibold">${regimeInfo.label}</div>
-                </div>
-                <div class="p-3 rounded-lg bg-dark-800/50 flex flex-col justify-center">
-                    <div class="text-xs text-gray-500">Sentiment</div>
-                    <div class="text-sm text-gray-300">
-                        ${v.risk_on ? '🟢 Risk-On Mode' : '🔴 Risk-Off Mode'}
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-
-    // Yield Analysis
-    const yieldEl = document.getElementById('yield-analysis');
-    if (yieldEl && analysis.yields) {
-        const y = analysis.yields;
-        yieldEl.innerHTML = `
-            <div class="grid grid-cols-4 gap-2 mb-3">
-                <div class="p-2 rounded-lg bg-dark-800/50 text-center">
-                    <div class="text-[9px] text-gray-600">2Y</div>
-                    <div class="text-xs font-mono text-white">${y['2y_yield']?.toFixed(3) || '—'}%</div>
-                </div>
-                <div class="p-2 rounded-lg bg-dark-800/50 text-center">
-                    <div class="text-[9px] text-gray-600">5Y</div>
-                    <div class="text-xs font-mono text-white">${y['5y_yield']?.toFixed(3) || '—'}%</div>
-                </div>
-                <div class="p-2 rounded-lg bg-dark-800/50 text-center">
-                    <div class="text-[9px] text-gray-600">10Y</div>
-                    <div class="text-xs font-mono text-white">${y['10y_yield']?.toFixed(3) || '—'}%</div>
-                </div>
-                <div class="p-2 rounded-lg bg-dark-800/50 text-center">
-                    <div class="text-[9px] text-gray-600">30Y</div>
-                    <div class="text-xs font-mono text-white">${y['30y_yield']?.toFixed(3) || '—'}%</div>
-                </div>
-            </div>
-            <div class="p-3 rounded-lg ${y.inverted ? 'bg-red-500/5 border-l-2 border-red-500' : 'bg-green-500/5 border-l-2 border-green-500'}">
-                <div class="flex items-center justify-between">
-                    <span class="text-xs font-semibold ${y.inverted ? 'text-red-400' : 'text-green-400'}">
-                        2Y-10Y Spread: ${y.spread_2_10?.toFixed(3) || '—'}%
-                    </span>
-                    <span class="text-[10px] text-gray-500">
-                        ${y.inverted ? '🔴 INVERTED — Recession Signal' : '🟢 Normal Yield Curve'}
-                    </span>
-                </div>
-            </div>
-        `;
-    }
-
-    // Correlation Matrix
-    const corrEl = document.getElementById('correlation-matrix');
-    if (corrEl && analysis.correlations) {
-        corrEl.innerHTML = `
-            <div class="space-y-2">
-                ${Object.entries(analysis.correlations).map(([pair, corr]) => `
-                    <div class="flex items-center justify-between p-2 rounded-lg bg-dark-800/30 text-xs">
-                        <span class="font-medium text-gray-300">${pair}</span>
-                        <div class="flex items-center gap-3">
-                            <span class="text-gray-500">${corr.relationship}</span>
-                            <span class="font-mono ${corr.dxy_correlation < 0 ? 'text-red-400' : 'text-green-400'}">
-                                ${corr.dxy_correlation?.toFixed(3) || '—'}
-                            </span>
-                            <span class="text-[10px] px-1.5 py-0.5 rounded ${
-                                corr.strength === 'strong' ? 'bg-yellow-500/10 text-yellow-400' :
-                                corr.strength === 'moderate' ? 'bg-blue-500/10 text-blue-400' :
-                                'bg-gray-500/10 text-gray-400'
-                            }">${corr.strength}</span>
-                        </div>
-                    </div>
-                `).join('')}
-            </div>
-        `;
-    }
-
-    // Regime Signals
-    const signalsEl = document.getElementById('regime-signals');
-    if (signalsEl && regime.signals) {
-        signalsEl.innerHTML = regime.signals.map(s => `
-            <div class="p-2.5 rounded-lg text-xs ${
-                s.type === 'risk_off' ? 'bg-red-500/5 border-l-2 border-red-500' :
-                s.type === 'risk_on' ? 'bg-green-500/5 border-l-2 border-green-500' :
-                s.type === 'warning' ? 'bg-yellow-500/5 border-l-2 border-yellow-500' :
-                'bg-blue-500/5 border-l-2 border-blue-500'
-            } mb-2">
-                <div class="text-gray-300">${s.message}</div>
-                <div class="text-[9px] text-gray-600 mt-0.5 capitalize">${s.severity} priority</div>
-            </div>
-        `).join('') || '<div class="text-center py-4 text-gray-600 text-xs">No regime signals detected</div>';
-    }
-
-    // Bias Summary
-    const biasEl = document.getElementById('bias-summary');
-    if (biasEl) {
-        const dxyTrend = analysis.dxy?.trend || 'neutral';
-        const vixVal = analysis.vix?.value || 15;
-        const yieldInv = analysis.yields?.inverted || false;
-
-        let biasText = '';
-        let biasColor = '';
-
-        if (dxyTrend === 'bullish' && vixVal < 15 && !yieldInv) {
-            biasText = 'Strong Dollar, Low Vol — Favor USD longs on pullbacks';
-            biasColor = 'green';
-        } else if (dxyTrend === 'bearish' && vixVal > 20) {
-            biasText = 'Weak Dollar, High Vol — Look for USD shorts, XAUUSD longs';
-            biasColor = 'yellow';
-        } else if (yieldInv) {
-            biasText = 'Inverted Curve — DEFENSIVE. Favor safe havens, reduce risk exposure';
-            biasColor = 'red';
-        } else {
-            biasText = 'Mixed signals — Wait for clearer confluence before committing';
-            biasColor = 'gray';
-        }
-
-        biasEl.innerHTML = `
-            <div class="p-4 rounded-lg bg-${biasColor}-500/5 border border-${biasColor}-500/20 text-center">
-                <div class="text-xs text-gray-300 leading-relaxed">${biasText}</div>
-            </div>
-        `;
+    // Regime
+    const regimeResult = await apiFetch('/api/analysis/regime');
+    if (regimeResult.status === 'ok' && regimeResult.data) {
+        updateElement('regime-banner', buildRegimeBanner(regimeResult.data));
+        updateElement('regime-signals', buildRegimeSignals(regimeResult.data.signals));
+        updateElement('bias-summary', buildBiasSummary(regimeResult.data));
     }
 }
 
-// ── Event Listeners ──────────────────────────────────────────────
+function updateElement(id, html) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+}
 
-document.addEventListener('DOMContentLoaded', () => {
-    // Determine which page we're on
+function buildDXYAnalysis(dxy) {
+    if (!dxy) return '<div class="text-gray-600">No DXY data available</div>';
+    const trend = dxy.trend === 'bullish' ? '↑' : '↓';
+    const trendColor = dxy.trend === 'bullish' ? 'text-green-400' : 'text-red-400';
+    return `
+        <div class="flex items-center justify-between">
+            <div>
+                <span class="text-2xl font-bold font-mono text-white">${dxy.value?.toFixed(2) || '—'}</span>
+                <span class="ml-2 ${trendColor}">${trend} ${dxy.change?.toFixed(2) || '0'}%</span>
+            </div>
+            <div class="text-right">
+                <div class="text-xs text-gray-500">Range</div>
+                <div class="text-xs font-mono text-gray-400">H: ${dxy.high?.toFixed(2) || '—'} L: ${dxy.low?.toFixed(2) || '—'}</div>
+                <div class="text-[9px] ${dxy.strength === 'very_strong' ? 'text-red-400' : dxy.strength === 'strong' ? 'text-orange-400' : 'text-gray-500'}">${dxy.strength || ''}</div>
+            </div>
+        </div>
+        <div class="mt-2 text-xs text-gray-500">DXY ${dxy.trend || 'neutral'} — ${dxy.strength || ''}</div>`;
+}
+
+function buildVIXAnalysis(vix) {
+    if (!vix) return '<div class="text-gray-600">No VIX data available</div>';
+    const riskLabel = vix.risk_on ? 'Risk-On' : 'Risk-Off';
+    const riskColor = vix.risk_on ? 'text-green-400' : 'text-red-400';
+    return `
+        <div class="flex items-center justify-between">
+            <div>
+                <span class="text-2xl font-bold font-mono text-white">${vix.value?.toFixed(1) || '—'}</span>
+                <span class="ml-2 text-sm ${vix.change >= 0 ? 'text-red-400' : 'text-green-400'}">${vix.change >= 0 ? '+' : ''}${vix.change?.toFixed(2) || '0'}%</span>
+            </div>
+            <div class="text-right">
+                <div class="text-xs ${riskColor} font-semibold">${riskLabel}</div>
+                <div class="text-[9px] text-gray-500">${vix.regime || ''}</div>
+            </div>
+        </div>
+        <div class="mt-2 flex gap-2 text-[10px]">
+            <span class="${vix.value < 15 ? 'text-green-400' : vix.value < 20 ? 'text-yellow-400' : 'text-red-400'}">${vix.value < 12 ? 'Complacent' : vix.value < 20 ? 'Normal' : vix.value < 30 ? 'Fearful' : 'Extreme Fear'}</span>
+        </div>`;
+}
+
+function buildYieldAnalysis(yields) {
+    if (!yields) return '<div class="text-gray-600">No yield data available</div>';
+    const status = yields.inverted ? '⚠️ INVERTED' : '✅ Normal';
+    const statusColor = yields.inverted ? 'text-red-400' : 'text-green-400';
+    return `
+        <div class="grid grid-cols-2 gap-3">
+            <div class="p-2 rounded bg-dark-800/30">
+                <div class="text-[9px] text-gray-500">2Y Yield</div>
+                <div class="text-sm font-mono text-gray-300">${yields['2y_yield']?.toFixed(3) || '—'}%</div>
+            </div>
+            <div class="p-2 rounded bg-dark-800/30">
+                <div class="text-[9px] text-gray-500">10Y Yield</div>
+                <div class="text-sm font-mono text-gray-300">${yields['10y_yield']?.toFixed(3) || '—'}%</div>
+            </div>
+            <div class="p-2 rounded bg-dark-800/30">
+                <div class="text-[9px] text-gray-500">30Y Yield</div>
+                <div class="text-sm font-mono text-gray-300">${yields['30y_yield']?.toFixed(3) || '—'}%</div>
+            </div>
+            <div class="p-2 rounded bg-dark-800/30">
+                <div class="text-[9px] text-gray-500">2-10 Spread</div>
+                <div class="text-sm font-mono ${statusColor}">${yields.spread_2_10?.toFixed(3) || '—'}%</div>
+            </div>
+        </div>
+        <div class="mt-2 text-xs ${statusColor} font-semibold">${status}</div>
+        ${yields.inverted ? '<div class="mt-1 text-[10px] text-red-400/70">Yield curve inversion historically precedes recessions — defensive positioning advised.</div>' : ''}`;
+}
+
+function buildCorrelationMatrix(correlations) {
+    if (!correlations || Object.keys(correlations).length === 0) {
+        return '<div class="text-gray-600">Loading correlations...</div>';
+    }
+    return `
+        <div class="overflow-x-auto">
+            <table class="w-full text-xs">
+                <thead>
+                    <tr class="text-gray-500 border-b border-dark-700/30">
+                        <th class="text-left py-2 px-2">Pair</th>
+                        <th class="text-center py-2 px-2">DXY Corr</th>
+                        <th class="text-center py-2 px-2">Relationship</th>
+                        <th class="text-center py-2 px-2">Strength</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${Object.keys(correlations).map(pair => {
+                        const c = correlations[pair];
+                        const corrColor = c.dxy_correlation < -0.5 ? 'text-red-400' : c.dxy_correlation > 0.5 ? 'text-green-400' : 'text-gray-400';
+                        return `
+                            <tr class="border-b border-dark-700/10">
+                                <td class="py-2 px-2 text-gray-300">${pair.slice(0, 3)}/<span class="text-gray-500">${pair.slice(3)}</span></td>
+                                <td class="text-center py-2 px-2 font-mono ${corrColor}">${c.dxy_correlation?.toFixed(2) || '—'}</td>
+                                <td class="text-center py-2 px-2 text-gray-400">${c.relationship || '—'}</td>
+                                <td class="text-center py-2 px-2">
+                                    <span class="px-1.5 py-0.5 rounded ${c.strength === 'strong' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-500/20 text-gray-400'}">${c.strength || '—'}</span>
+                                </td>
+                            </tr>`;
+                    }).join('')}
+                </tbody>
+            </table>
+            <div class="text-[9px] text-gray-600 mt-2">DXY correlation: negative = inverse relationship (typical for USD pairs)</div>
+        </div>`;
+}
+
+function buildRegimeBanner(regime) {
+    const bgColors = { 'RISK-ON': 'bg-green-500/10 border-green-500/30', 'DEFENSIVE': 'bg-red-500/10 border-red-500/30', 'NEUTRAL': 'bg-yellow-500/10 border-yellow-500/30' };
+    const textColors = { 'RISK-ON': 'text-green-400', 'DEFENSIVE': 'text-red-400', 'NEUTRAL': 'text-yellow-400' };
+    const bg = bgColors[regime.regime] || bgColors['NEUTRAL'];
+    const tc = textColors[regime.regime] || textColors['NEUTRAL'];
+    return `
+        <div class="p-4 rounded-lg ${bg} border">
+            <div class="flex items-center justify-between">
+                <div>
+                    <div class="text-xs text-gray-500 mb-1">Current Market Regime</div>
+                    <div class="text-xl font-bold ${tc}">${regime.regime || 'NEUTRAL'}</div>
+                </div>
+                <div class="text-right text-[10px] text-gray-500">
+                    <div>VIX: ${regime.vix?.toFixed(1) || '—'}</div>
+                    <div>DXY: ${regime.dxy_value?.toFixed(2) || '—'}</div>
+                    <div>Spread: ${regime.yield_spread?.toFixed(3) || '—'}</div>
+                </div>
+            </div>
+        </div>`;
+}
+
+function buildRegimeSignals(signals) {
+    if (!signals || signals.length === 0) {
+        return '<div class="text-xs text-gray-500 text-center py-4">No regime signals</div>';
+    }
+    return signals.map(s => `
+        <div class="p-2.5 rounded-lg bg-dark-800/30 flex items-start gap-2">
+            <span class="text-[9px] px-1.5 py-0.5 rounded flex-shrink-0 ${s.severity === 'high' || s.severity === 'extreme' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'}">${s.type}</span>
+            <span class="text-xs text-gray-400">${s.message}</span>
+        </div>
+    `).join('');
+}
+
+function buildBiasSummary(regime) {
+    const rc = regime.regime === 'RISK-ON' ? 'text-green-400' : regime.regime === 'DEFENSIVE' ? 'text-red-400' : 'text-yellow-400';
+    return `
+        <div class="p-3 rounded-lg bg-dark-800/30">
+            <div class="text-sm font-semibold ${rc}">${regime.regime || 'NEUTRAL'}</div>
+            <div class="mt-2 space-y-1 text-xs text-gray-500">
+                <div class="flex justify-between"><span>Volatility</span><span class="${regime.vix > 20 ? 'text-red-400' : 'text-green-400'}">${regime.vix > 20 ? 'Elevated' : 'Normal'}</span></div>
+                <div class="flex justify-between"><span>Yield Curve</span><span class="${regime.yield_spread < 0 ? 'text-red-400' : 'text-green-400'}">${regime.yield_spread < 0 ? 'Inverted' : 'Normal'}</span></div>
+                <div class="flex justify-between"><span>Risk Appetite</span><span class="${regime.vix < 15 ? 'text-green-400' : 'text-red-400'}">${regime.vix < 15 ? 'Risk-On' : 'Risk-Off'}</span></div>
+            </div>
+        </div>`;
+}
+
+// ── Refresh All ──────────────────────────────────────────────────────
+
+async function refreshAll() {
+    await Promise.all([
+        refreshMarketOverview(),
+        refreshSetups(),
+        refreshSignalMatrix(),
+        refreshNewsPreview(),
+        refreshRegime(),
+        refreshCrossAsset(),
+    ]);
+}
+
+function updateLastUpdate() {
+    const el = document.getElementById('last-update');
+    if (el) el.textContent = formatTimestamp();
+}
+
+// ── Initialize ────────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Check which page we're on
     const path = window.location.pathname;
 
     if (path === '/' || path === '') {
         refreshAll();
-        // Auto-refresh every 60 seconds
-        setInterval(refreshAll, 60000);
-    } else if (path === '/signals') {
-        refreshSignals();
-        document.getElementById('pair-filter')?.addEventListener('change', refreshSignals);
-        setInterval(refreshSignals, 60000);
-    } else if (path === '/news') {
-        refreshNews();
-        document.getElementById('currency-filter')?.addEventListener('change', refreshNews);
-        document.getElementById('impact-filter')?.addEventListener('change', refreshNews);
-        document.querySelectorAll('.time-tab').forEach(tab => {
-            tab.addEventListener('click', () => {
-                document.querySelectorAll('.time-tab').forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
-                refreshNews();
-            });
-        });
-        setInterval(refreshNews, 30000);
-    } else if (path === '/analysis') {
-        refreshAnalysis();
-        setInterval(refreshAnalysis, 120000);
+        // Auto-refresh every 30 seconds
+        refreshInterval = setInterval(refreshAll, 30000);
     }
+
+    if (path === '/signals') {
+        refreshSignals();
+        refreshSignalSummary();
+        refreshInterval = setInterval(refreshSignals, 30000);
+    }
+
+    if (path === '/news') {
+        refreshNews();
+        refreshNewsStats();
+        refreshInterval = setInterval(() => { refreshNews(); refreshNewsStats(); }, 30000);
+    }
+
+    if (path === '/analysis') {
+        refreshAnalysis();
+        refreshInterval = setInterval(refreshAnalysis, 60000);
+    }
+
+    // Bind filters
+    const pairFilter = document.getElementById('pair-filter');
+    if (pairFilter) pairFilter.addEventListener('change', refreshSignals);
+
+    const currencyFilter = document.getElementById('currency-filter');
+    if (currencyFilter) currencyFilter.addEventListener('change', () => {
+        const hours = document.querySelector('.time-tab.active');
+        refreshNews(hours ? parseInt(hours.dataset.hours) : 72);
+    });
+
+    const impactFilter = document.getElementById('impact-filter');
+    if (impactFilter) impactFilter.addEventListener('change', () => {
+        const hours = document.querySelector('.time-tab.active');
+        refreshNews(hours ? parseInt(hours.dataset.hours) : 72);
+    });
+
+    // Time tabs
+    document.querySelectorAll('.time-tab').forEach(tab => {
+        tab.addEventListener('click', function() {
+            document.querySelectorAll('.time-tab').forEach(t => t.classList.remove('active'));
+            this.classList.add('active');
+            refreshNews(parseInt(this.dataset.hours));
+        });
+    });
 });

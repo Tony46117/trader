@@ -284,7 +284,7 @@ def parse_numeric(value):
     """Parse numeric value from string, handling K/B/M suffixes."""
     if not value:
         return None
-    value = value.strip().replace(",", "").replace("%", "").replace("$", "").replace("€", "£", "")
+    value = value.strip().replace(",", "").replace("%", "").replace("$", "").replace("€", "").replace("£", "")
     value = value.replace("−", "-").replace("+", "").strip()
 
     try:

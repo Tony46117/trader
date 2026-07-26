@@ -1,8 +1,10 @@
 *.pyc
 __pycache__/
-*.pyo
+*.so
+*.o
+data/cache/*
+data/news/*
+venv/
+.venv/
+*.egg-info/
 .env
-*.csv
-data/cache/
-*.log
-
