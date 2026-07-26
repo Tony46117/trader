@@ -322,37 +322,55 @@ def score_indicators(df, pair_key):
 
 
 # ── Entry / SL / TP Calculation ──────────────────────────────────────
+# Enforces minimum 1:2 risk-reward ratio on all setups.
 
 def calculate_levels(pair_key, current_price, direction, atr_val, df):
-    """Calculate entry, stop loss, and take profit levels."""
+    """Calculate entry, stop loss, and take profit levels.
+    
+    Enforces minimum 1:2 RR ratio. If computed TP doesn't meet
+    the minimum, the TP is extended to meet the requirement.
+    Returns None if the setup cannot achieve 1:2 RR.
+    """
     sl_mult = SIGNAL_CONFIG["atr_multiplier_sl"]
     tp1_mult = SIGNAL_CONFIG["atr_multiplier_tp1"]
     tp2_mult = SIGNAL_CONFIG["atr_multiplier_tp2"]
     tp3_mult = SIGNAL_CONFIG["atr_multiplier_tp3"]
+    min_rr = SIGNAL_CONFIG.get("min_rr_ratio", 2.0)
 
     pair_info = PAIRS.get(pair_key, {})
     precision = 5 if pair_info.get("type") == "forex" else 2
 
+    if direction == "NEUTRAL":
+        return None
+
     if direction == "BUY":
         entry = current_price
         sl = entry - (atr_val * sl_mult)
-        tp1 = entry + (atr_val * tp1_mult)
-        tp2 = entry + (atr_val * tp2_mult)
-        tp3 = entry + (atr_val * tp3_mult)
-        rr1 = abs((tp1 - entry) / (entry - sl)) if (entry - sl) != 0 else 0
-        rr2 = abs((tp2 - entry) / (entry - sl)) if (entry - sl) != 0 else 0
+        risk = entry - sl
+        # Enforce minimum RR: TP must be at least min_rr * risk above entry
+        tp1 = max(entry + (atr_val * tp1_mult), entry + (risk * min_rr))
+        tp2 = max(entry + (atr_val * tp2_mult), entry + (risk * (min_rr + 1)))
+        tp3 = max(entry + (atr_val * tp3_mult), entry + (risk * (min_rr + 2)))
+        rr1 = (tp1 - entry) / risk if risk > 0 else 0
+        rr2 = (tp2 - entry) / risk if risk > 0 else 0
+        rr3 = (tp3 - entry) / risk if risk > 0 else 0
     elif direction == "SELL":
         entry = current_price
         sl = entry + (atr_val * sl_mult)
-        tp1 = entry - (atr_val * tp1_mult)
-        tp2 = entry - (atr_val * tp2_mult)
-        tp3 = entry - (atr_val * tp3_mult)
-        rr1 = abs((entry - tp1) / (sl - entry)) if (sl - entry) != 0 else 0
-        rr2 = abs((entry - tp2) / (sl - entry)) if (sl - entry) != 0 else 0
+        risk = sl - entry
+        # Enforce minimum RR: TP must be at least min_rr * risk below entry
+        tp1 = min(entry - (atr_val * tp1_mult), entry - (risk * min_rr))
+        tp2 = min(entry - (atr_val * tp2_mult), entry - (risk * (min_rr + 1)))
+        tp3 = min(entry - (atr_val * tp3_mult), entry - (risk * (min_rr + 2)))
+        rr1 = (entry - tp1) / risk if risk > 0 else 0
+        rr2 = (entry - tp2) / risk if risk > 0 else 0
+        rr3 = (entry - tp3) / risk if risk > 0 else 0
     else:
-        return {"entry": round(current_price, precision), "sl": round(current_price, precision),
-                "tp1": round(current_price, precision), "tp2": round(current_price, precision),
-                "tp3": round(current_price, precision), "rr1": 0, "rr2": 0}
+        return None
+
+    # Validate minimum RR is met
+    if rr1 < min_rr:
+        return None
 
     return {
         "entry": round(entry, precision),
@@ -362,6 +380,8 @@ def calculate_levels(pair_key, current_price, direction, atr_val, df):
         "tp3": round(tp3, precision),
         "rr1": round(rr1, 2),
         "rr2": round(rr2, 2),
+        "rr3": round(rr3, 2),
+        "risk_pips": round(risk / (PAIRS.get(pair_key, {}).get("pip", 0.0001)), 1),
     }
 
 
@@ -389,8 +409,13 @@ def generate_technical_signal(pair_key):
     # Score indicators
     score, direction, details = score_indicators(df, pair_key)
 
-    # Calculate levels
+    # Calculate levels — returns None if setup doesn't meet 1:2 RR
     levels = calculate_levels(pair_key, current_price, direction, atr_val, df)
+
+    # If levels don't meet minimum RR, downgrade to NEUTRAL
+    if levels is None and direction != "NEUTRAL":
+        direction = "NEUTRAL"
+        score = 50
 
     # Compute pivots
     pivots = compute_pivot_points(df)
@@ -415,7 +440,7 @@ def generate_technical_signal(pair_key):
     pair_info = PAIRS.get(pair_key, {})
     precision = 5 if pair_info.get("type") == "forex" else 2
 
-    return {
+    result = {
         "pair": pair_key,
         "pair_name": pair_info.get("name", pair_key),
         "type": pair_info.get("type", "unknown"),
@@ -430,7 +455,6 @@ def generate_technical_signal(pair_key):
         },
         # Levels
         "current_price": round(current_price, precision),
-        **levels,
         # Timing
         "timing": timing,
         # Support/Resistance
@@ -440,6 +464,16 @@ def generate_technical_signal(pair_key):
         "price_change_24h": round(float(((current_price / df["Close"].iloc[-24]) - 1) * 100), 2) if len(df) >= 24 else 0,
         "updated": datetime.now().strftime("%H:%M:%S"),
     }
+
+    # Add levels only if they meet 1:2 RR
+    if levels is not None:
+        result.update(levels)
+        result["setup_valid"] = True
+    else:
+        result["setup_valid"] = False
+        result["setup_invalid_reason"] = "Does not meet minimum 1:2 R:R ratio"
+
+    return result
 
 
 def generate_all_technical_signals():

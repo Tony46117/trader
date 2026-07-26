@@ -2,7 +2,6 @@
 
 const API_BASE = '';
 let refreshInterval = null;
-let charts = {};
 
 // ── Utilities ────────────────────────────────────────────────────────
 
@@ -16,11 +15,6 @@ function formatChange(val) {
     if (val === null || val === undefined) return '0.00%';
     const sign = val >= 0 ? '+' : '';
     return `${sign}${val.toFixed(2)}%`;
-}
-
-function timeSince(dateStr) {
-    if (!dateStr || dateStr === '—') return '—';
-    return dateStr;
 }
 
 function signalClass(signal) {
@@ -41,13 +35,20 @@ function formatTimestamp() {
     return new Date().toLocaleTimeString('en-US', { hour12: false });
 }
 
+function rrBadge(rr) {
+    if (rr === null || rr === undefined) return '<span class="text-[9px] text-gray-600">—</span>';
+    const rrNum = parseFloat(rr);
+    if (rrNum < 2.0) return `<span class="text-[9px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 font-semibold">1:${rrNum.toFixed(1)} LOW</span>`;
+    if (rrNum >= 4.0) return `<span class="text-[9px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 font-semibold">1:${rrNum.toFixed(1)}</span>`;
+    return `<span class="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-semibold">1:${rrNum.toFixed(1)}</span>`;
+}
+
 // ── API Calls ────────────────────────────────────────────────────────
 
 async function apiFetch(endpoint) {
     try {
         const res = await fetch(`${API_BASE}${endpoint}`);
-        const data = await res.json();
-        return data;
+        return await res.json();
     } catch (err) {
         console.error(`API error [${endpoint}]:`, err);
         return { status: 'error', message: err.message };
@@ -67,7 +68,9 @@ async function refreshMarketOverview() {
 
         const item = data[pair];
         const cls = signalClass(item.direction);
-        card.className = `pair-card ${cls}-highlight`;
+        const isValid = item.setup_valid;
+
+        card.className = `pair-card ${cls}-highlight` + (isValid ? ' setup-valid' : '');
 
         const priceEl = card.querySelector('.pair-price');
         if (priceEl) priceEl.textContent = formatPrice(item.price, pair);
@@ -86,6 +89,17 @@ async function refreshMarketOverview() {
 
         const tpEl = card.querySelector('.pair-tp');
         if (tpEl) tpEl.textContent = formatPrice(item.tp1, pair);
+
+        const rrEl = card.querySelector('.pair-rr');
+        if (rrEl) rrEl.innerHTML = rrBadge(item.rr1);
+
+        if (!isValid) {
+            const invalidBadge = card.querySelector('.invalid-badge');
+            if (invalidBadge) invalidBadge.style.display = 'flex';
+        } else {
+            const invalidBadge = card.querySelector('.invalid-badge');
+            if (invalidBadge) invalidBadge.style.display = 'none';
+        }
     });
 
     updateLastUpdate();
@@ -100,15 +114,15 @@ async function refreshSetups() {
     if (!container) return;
 
     const setups = result.data;
-    if (countEl) countEl.textContent = `${setups.length} active setups`;
+    if (countEl) countEl.textContent = `${setups.length} active`;
 
     if (setups.length === 0) {
         container.innerHTML = `
             <div class="flex flex-col items-center justify-center py-8 text-gray-600">
-                <svg class="w-10 h-10 mb-2 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                <svg class="w-8 h-8 mb-2 text-gray-700 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                 </svg>
-                <span class="text-sm">No active setups above threshold</span>
+                <span class="text-sm">No active setups</span>
                 <span class="text-xs mt-1">Waiting for clearer signals</span>
             </div>`;
         return;
@@ -116,20 +130,33 @@ async function refreshSetups() {
 
     container.innerHTML = setups.map((s, i) => {
         const cls = signalClass(s.direction);
+        const isValid = s.setup_valid !== false;
         return `
-            <div class="flex items-center justify-between p-3 rounded-lg bg-dark-800/50 border border-dark-700/30 fade-in" style="animation-delay: ${i * 50}ms">
-                <div class="flex items-center gap-3">
-                    <div class="w-8 h-8 rounded-full ${cls === 'buy' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'} flex items-center justify-center text-xs font-bold">
-                        ${s.direction === 'BUY' ? 'B' : 'S'}
+            <div class="setup-card setup-card-${cls} fade-in" style="animation-delay: ${i * 50}ms">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="w-9 h-9 rounded-xl ${cls === 'buy' ? 'bg-green-500/15 text-green-400' : 'bg-red-500/15 text-red-400'} flex items-center justify-center text-sm font-bold">
+                            ${s.direction === 'BUY' ? '↑' : '↓'}
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-white">${s.pair_name || s.pair}</div>
+                            <div class="text-[10px] text-gray-500 max-w-[200px] truncate">${s.verdict ? s.verdict.substring(0, 55) : ''}</div>
+                        </div>
                     </div>
-                    <div>
-                        <div class="text-sm font-semibold text-white">${s.pair_name || s.pair}</div>
-                        <div class="text-[10px] text-gray-500">${s.verdict ? s.verdict.substring(0, 60) + '...' : ''}</div>
+                    <div class="text-right">
+                        <div class="text-base font-bold font-mono ${cls === 'buy' ? 'text-green-400' : 'text-red-400'}">${s.score}</div>
+                        <div class="flex items-center gap-1.5 justify-end mt-0.5">
+                            ${signalBadge(s.direction)}
+                            <span class="text-[9px] text-gray-500">${s.timing}</span>
+                        </div>
                     </div>
                 </div>
-                <div class="text-right">
-                    <div class="text-sm font-bold font-mono ${cls === 'buy' ? 'text-green-400' : 'text-red-400'}">${s.score}</div>
-                    <div class="text-[10px] text-gray-500">${s.confidence} · ${s.timing}</div>
+                <div class="flex items-center justify-between mt-2 pt-2 border-t border-white/[0.04]">
+                    <div class="text-[9px] text-gray-600">${s.confidence} confidence</div>
+                    <div class="flex items-center gap-1">
+                        <span class="text-[9px] text-gray-600">R:R</span>
+                        ${rrBadge(s.risk_reward_1)}
+                    </div>
                 </div>
             </div>`;
     }).join('');
@@ -149,20 +176,20 @@ async function refreshSignalMatrix() {
         const tech = sig.technical_signal || {};
         const news = sig.news_signal || {};
         const components = unified.components || {};
-
-        const dir = signalClass(unified.direction);
-        const price = sig.current_price;
+        const isValid = sig.setup_valid !== false;
 
         return `
-            <tr class="border-b border-dark-700/20 hover:bg-dark-800/30 transition-colors fade-in">
+            <tr class="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors fade-in">
                 <td class="py-2.5 px-2">
-                    <span class="font-semibold text-white">${pair.slice(0, 3)}/<span class="text-gray-400">${pair.slice(3)}</span></span>
+                    <div class="flex items-center gap-2">
+                        <span class="font-semibold text-white">${pair.slice(0, 3)}/<span class="text-gray-400">${pair.slice(3)}</span></span>
+                        ${!isValid ? '<span class="text-[8px] px-1 py-0.5 rounded bg-red-500/10 text-red-400 font-bold">NO SETUP</span>' : ''}
+                    </div>
                     <div class="text-[9px] text-gray-600">${sig.type || ''}</div>
                 </td>
-                <td class="text-right py-2.5 px-2 font-mono text-sm text-gray-200">${formatPrice(price, pair)}</td>
+                <td class="text-right py-2.5 px-2 font-mono text-sm text-gray-200">${formatPrice(sig.current_price, pair)}</td>
                 <td class="text-center py-2.5 px-2">
                     <div class="text-xs font-mono ${tech.score >= 60 ? 'text-green-400' : tech.score <= 40 ? 'text-red-400' : 'text-gray-400'}">${tech.score || 50}</div>
-                    ${components ? `<div class="w-full h-1 bg-dark-700 rounded mt-1"><div class="component-bar ${tech.score >= 60 ? 'buy' : tech.score <= 40 ? 'sell' : 'neutral'}" style="width:${tech.score || 50}%"></div></div>` : ''}
                 </td>
                 <td class="text-center py-2.5 px-2">${signalBadge(tech.direction)}</td>
                 <td class="text-center py-2.5 px-2">
@@ -178,8 +205,9 @@ async function refreshSignalMatrix() {
                 <td class="text-right py-2.5 px-2 font-mono text-xs text-yellow-400">${formatPrice(sig.entry_price, pair)}</td>
                 <td class="text-right py-2.5 px-2 font-mono text-xs text-red-400">${formatPrice(sig.stop_loss, pair)}</td>
                 <td class="text-right py-2.5 px-2 font-mono text-xs text-green-400">${formatPrice(sig.take_profit_1, pair)}</td>
+                <td class="text-center py-2.5 px-2">${rrBadge(sig.risk_reward_1)}</td>
                 <td class="text-center py-2.5 px-2">
-                    <span class="text-[9px] px-1.5 py-0.5 rounded ${sig.timing === 'IMMEDIATE' ? 'bg-green-500/20 text-green-400' : sig.timing === 'SOON' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-500/20 text-gray-400'}">${sig.timing || 'WAIT'}</span>
+                    <span class="text-[9px] px-1.5 py-0.5 rounded ${sig.timing === 'IMMEDIATE' ? 'bg-green-500/10 text-green-400' : sig.timing === 'SOON' ? 'bg-yellow-500/10 text-yellow-400' : 'bg-gray-500/10 text-gray-400'}">${sig.timing || 'WAIT'}</span>
                 </td>
             </tr>`;
     }).join('');
@@ -194,27 +222,22 @@ async function refreshNewsPreview() {
 
     const events = result.data.slice(0, 5);
     if (events.length === 0) {
-        container.innerHTML = `
-            <div class="text-center py-4 text-gray-600 text-xs">
-                No upcoming events in the next 48 hours
-            </div>`;
+        container.innerHTML = `<div class="text-center py-4 text-gray-600 text-xs">No upcoming events in 48H</div>`;
         return;
     }
 
     container.innerHTML = events.map((e, i) => {
         const isHigh = e.impact && (e.impact.toLowerCase().includes('high') || e.impact.toLowerCase().includes('red'));
-        const impactClass = isHigh ? 'impact-high' : 'impact-medium';
         return `
-            <div class="p-2.5 rounded-lg ${impactClass} mb-1.5 fade-in" style="animation-delay: ${i * 80}ms">
+            <div class="p-2.5 rounded-lg ${isHigh ? 'impact-high' : 'impact-medium'} mb-1.5 fade-in" style="animation-delay: ${i * 80}ms">
                 <div class="flex items-center justify-between">
-                    <span class="text-[10px] font-semibold ${isHigh ? 'text-red-400' : 'text-orange-400'}">${e.currency || ''}</span>
-                    <span class="text-[9px] text-gray-500">${e.datetime ? e.datetime.split(' ')[1] : ''}</span>
+                    <span class="text-[10px] font-bold ${isHigh ? 'text-red-400' : 'text-orange-400'}">${e.currency || ''}</span>
+                    <span class="text-[9px] text-gray-500 font-mono">${e.datetime ? e.datetime.split(' ')[1] : ''}</span>
                 </div>
-                <div class="text-xs text-gray-300 mt-0.5">${e.event || ''}</div>
+                <div class="text-xs text-gray-300 mt-0.5 truncate">${e.event || ''}</div>
                 <div class="flex items-center gap-2 mt-1 text-[9px] text-gray-500">
                     <span>F: ${e.forecast || '—'}</span>
                     <span>P: ${e.previous || '—'}</span>
-                    ${signalBadge(e.direction, e.direction)}
                 </div>
             </div>`;
     }).join('');
@@ -229,23 +252,23 @@ async function refreshRegime() {
 
     const r = result.data;
     const regimeColor = r.regime_color === 'green' ? 'text-green-400' : r.regime_color === 'red' ? 'text-red-400' : 'text-yellow-400';
-    const bgColor = r.regime_color === 'green' ? 'bg-green-500/10 border-green-500/30' : r.regime_color === 'red' ? 'bg-red-500/10 border-red-500/30' : 'bg-yellow-500/10 border-yellow-500/30';
+    const bgColor = r.regime_color === 'green' ? 'bg-green-500/5 border-green-500/20' : r.regime_color === 'red' ? 'bg-red-500/5 border-red-500/20' : 'bg-yellow-500/5 border-yellow-500/20';
 
     container.innerHTML = `
         <div class="p-3 rounded-lg ${bgColor} border">
             <div class="flex items-center justify-between">
-                <span class="text-xs font-semibold ${regimeColor}">${r.regime || 'NEUTRAL'}</span>
-                <span class="text-[10px] text-gray-500">VIX: ${r.vix?.toFixed(1) || '—'}</span>
+                <span class="text-xs font-bold ${regimeColor}">${r.regime || 'NEUTRAL'}</span>
+                <span class="text-[10px] text-gray-500 font-mono">VIX ${r.vix?.toFixed(1) || '—'}</span>
             </div>
             <div class="flex justify-between mt-2 text-[10px] text-gray-500">
-                <span>DXY: ${r.dxy_value?.toFixed(2) || '—'}</span>
-                <span>Yield: ${r.yield_spread?.toFixed(3) || '—'}</span>
+                <span>DXY ${r.dxy_value?.toFixed(2) || '—'}</span>
+                <span>Spread ${r.yield_spread?.toFixed(3) || '—'}</span>
             </div>
         </div>
         ${(r.signals || []).slice(0, 2).map(s => `
-            <div class="flex items-start gap-2 text-xs text-gray-400 p-2 rounded-lg bg-dark-800/30">
-                <span class="text-[9px] px-1.5 py-0.5 rounded ${s.severity === 'high' || s.severity === 'extreme' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'}">${s.type}</span>
-                <span>${s.message}</span>
+            <div class="flex items-start gap-2 text-xs text-gray-400 p-2 rounded-lg bg-white/[0.02] mt-1.5">
+                <span class="text-[9px] px-1.5 py-0.5 rounded flex-shrink-0 ${s.severity === 'high' || s.severity === 'extreme' ? 'bg-red-500/10 text-red-400' : 'bg-yellow-500/10 text-yellow-400'}">${s.type}</span>
+                <span class="text-[10px]">${s.message}</span>
             </div>
         `).join('')}
     `;
@@ -267,7 +290,7 @@ async function refreshCrossAsset() {
     ];
 
     container.innerHTML = items.map(item => `
-        <div class="flex items-center justify-between p-2 rounded-lg bg-dark-800/30">
+        <div class="flex items-center justify-between p-2 rounded-lg bg-white/[0.02]">
             <span class="text-xs text-gray-500">${item.label}</span>
             <div class="text-right">
                 <span class="text-xs font-mono font-semibold ${item.color}">${item.value?.toFixed(2) || '—'}</span>
@@ -290,23 +313,19 @@ async function refreshSignals() {
         : await apiFetch(`/api/signals/unified/${selected}`);
 
     if (result.status !== 'ok') {
-        container.innerHTML = `<div class="text-center py-8 text-red-400">Error: ${result.message}</div>`;
+        container.innerHTML = `<div class="text-center py-8 text-red-400 text-sm">Error: ${result.message}</div>`;
         return;
     }
 
     if (selected === 'all') {
-        // Show all pairs as expandable cards
         const data = result.data;
         container.innerHTML = Object.keys(data).map(pair => buildSignalCard(pair, data[pair])).join('');
-        // Update S/R quick ref
         updateSRQuickRef(null);
     } else {
-        const data = result.data;
-        container.innerHTML = buildSignalCard(selected, data);
-        updateSRQuickRef(data);
+        container.innerHTML = buildSignalCard(selected, result.data);
+        updateSRQuickRef(result.data);
     }
 
-    // Update summary
     await refreshSignalSummary();
 }
 
@@ -318,15 +337,15 @@ function buildSignalCard(pair, sig) {
     const cme = sig.cme_signal || {};
     const social = sig.social_signal || {};
     const components = unified.components || {};
-
     const dir = signalClass(unified.direction);
     const conf = unified.confidence || 'LOW';
+    const isValid = sig.setup_valid !== false;
 
     return `
-        <div class="bg-dark-800/40 border border-dark-700/30 rounded-lg p-4 mb-3 fade-in signal-card" data-pair="${pair}">
+        <div class="section-card mb-3 fade-in signal-card" data-pair="${pair}" style="opacity: ${isValid ? '1' : '0.55'}">
             <div class="flex items-center justify-between mb-3">
                 <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-xl ${dir === 'buy' ? 'bg-green-500/20' : dir === 'sell' ? 'bg-red-500/20' : 'bg-gray-500/20'} flex items-center justify-center">
+                    <div class="w-10 h-10 rounded-xl ${dir === 'buy' ? 'bg-green-500/15' : dir === 'sell' ? 'bg-red-500/15' : 'bg-white/5'} flex items-center justify-center">
                         <span class="text-lg font-bold ${dir === 'buy' ? 'text-green-400' : dir === 'sell' ? 'text-red-400' : 'text-gray-400'}">${unified.direction === 'BUY' ? '↑' : unified.direction === 'SELL' ? '↓' : '→'}</span>
                     </div>
                     <div>
@@ -334,13 +353,13 @@ function buildSignalCard(pair, sig) {
                         <div class="flex items-center gap-2 mt-0.5">
                             ${signalBadge(unified.direction)}
                             <span class="text-[10px] ${conf === 'HIGH' ? 'text-green-400' : conf === 'MEDIUM' ? 'text-yellow-400' : 'text-gray-500'}">${conf}</span>
-                            <span class="text-[10px] text-gray-600">${unified.agreement || ''}</span>
+                            ${!isValid ? '<span class="text-[9px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 font-bold">NO SETUP</span>' : ''}
                         </div>
                     </div>
                 </div>
                 <div class="text-right">
-                    <div class="text-lg font-bold font-mono ${dir === 'buy' ? 'text-green-400' : dir === 'sell' ? 'text-red-400' : 'text-gray-400'}">${unified.score || 50}</div>
-                    <div class="text-[9px] text-gray-600">Unified Score</div>
+                    <div class="text-xl font-bold font-mono ${dir === 'buy' ? 'text-green-400' : dir === 'sell' ? 'text-red-400' : 'text-gray-400'}">${unified.score || 50}</div>
+                    <div class="text-[9px] text-gray-600">Unified</div>
                 </div>
             </div>
 
@@ -358,30 +377,30 @@ function buildSignalCard(pair, sig) {
                         <div class="text-center">
                             <div class="text-[9px] text-gray-500 mb-1">${c.label}</div>
                             <div class="text-xs font-mono font-semibold ${cDir === 'buy' ? 'text-green-400' : cDir === 'sell' ? 'text-red-400' : 'text-gray-400'}">${Math.round(c.score)}</div>
-                            <div class="w-full h-1 bg-dark-700 rounded mt-1">
+                            <div class="w-full h-1 bg-white/5 rounded mt-1">
                                 <div class="component-bar ${cDir}" style="width: ${c.score}%"></div>
                             </div>
                         </div>`;
                 }).join('')}
             </div>
 
-            <!-- Levels -->
-            <div class="grid grid-cols-4 gap-3 p-3 rounded-lg bg-dark-900/50">
+            <!-- Entry/SL/TP/R:R -->
+            <div class="grid grid-cols-4 gap-3 p-3 rounded-xl bg-white/[0.02] border border-white/[0.04]">
                 <div>
-                    <div class="text-[9px] text-gray-600">Entry</div>
-                    <div class="text-xs font-mono text-yellow-400 font-semibold">${formatPrice(sig.entry_price, pair)}</div>
+                    <div class="text-[9px] text-gray-600 mb-0.5">Entry</div>
+                    <div class="text-xs font-mono text-yellow-400 font-bold">${formatPrice(sig.entry_price, pair)}</div>
                 </div>
                 <div>
-                    <div class="text-[9px] text-gray-600">Stop Loss</div>
-                    <div class="text-xs font-mono text-red-400 font-semibold">${formatPrice(sig.stop_loss, pair)}</div>
+                    <div class="text-[9px] text-gray-600 mb-0.5">Stop Loss</div>
+                    <div class="text-xs font-mono text-red-400 font-bold">${formatPrice(sig.stop_loss, pair)}</div>
                 </div>
                 <div>
-                    <div class="text-[9px] text-gray-600">TP1</div>
-                    <div class="text-xs font-mono text-green-400 font-semibold">${formatPrice(sig.take_profit_1, pair)}</div>
+                    <div class="text-[9px] text-gray-600 mb-0.5">TP1</div>
+                    <div class="text-xs font-mono text-green-400 font-bold">${formatPrice(sig.take_profit_1, pair)}</div>
                 </div>
                 <div>
-                    <div class="text-[9px] text-gray-600">R:R</div>
-                    <div class="text-xs font-mono text-gray-300 font-semibold">1:${sig.risk_reward_1?.toFixed(1) || '—'}</div>
+                    <div class="text-[9px] text-gray-600 mb-0.5">R:R</div>
+                    ${rrBadge(sig.risk_reward_1)}
                 </div>
             </div>
 
@@ -393,8 +412,7 @@ function buildSignalCard(pair, sig) {
                 <span>S1: <span class="font-mono text-green-400">${formatPrice(sig.cme_levels.primary_support, pair)}</span></span>
             </div>` : ''}
 
-            <!-- Verdict -->
-            <div class="mt-2 text-xs text-gray-500 italic">${unified.verdict || ''}</div>
+            <div class="mt-2 text-[11px] text-gray-500 italic">${unified.verdict || ''}</div>
         </div>`;
 }
 
@@ -404,22 +422,20 @@ function updateSRQuickRef(signalData) {
 
     if (!signalData || !signalData.support_levels || !signalData.resistance_levels) {
         container.innerHTML = `
-            <h3 class="text-sm font-semibold text-white mb-3">S/R Levels</h3>
-            <div class="text-xs text-gray-500 text-center py-4">
-                Select a signal to view support & resistance
-            </div>`;
+            <h3 class="text-sm font-bold text-white mb-3">S/R Levels</h3>
+            <div class="text-xs text-gray-500 text-center py-4">Select a signal to view levels</div>`;
         return;
     }
 
     container.innerHTML = `
-        <h3 class="text-sm font-semibold text-white mb-3">S/R Levels</h3>
+        <h3 class="text-sm font-bold text-white mb-3">S/R Levels</h3>
         <div class="space-y-2">
-            <div class="p-2 rounded-lg bg-red-500/5 border border-red-500/20">
-                <div class="text-[9px] text-red-400 mb-1">RESISTANCE</div>
+            <div class="p-2 rounded-lg bg-red-500/5 border border-red-500/15">
+                <div class="text-[9px] text-red-400 mb-1 font-semibold">RESISTANCE</div>
                 ${(signalData.resistance_levels || []).map(l => `<div class="text-xs font-mono text-gray-300">${formatPrice(l, null)}</div>`).join('')}
             </div>
-            <div class="p-2 rounded-lg bg-green-500/5 border border-green-500/20">
-                <div class="text-[9px] text-green-400 mb-1">SUPPORT</div>
+            <div class="p-2 rounded-lg bg-green-500/5 border border-green-500/15">
+                <div class="text-[9px] text-green-400 mb-1 font-semibold">SUPPORT</div>
                 ${(signalData.support_levels || []).map(l => `<div class="text-xs font-mono text-gray-300">${formatPrice(l, null)}</div>`).join('')}
             </div>
         </div>`;
@@ -433,41 +449,54 @@ async function refreshSignalSummary() {
     if (result.status !== 'ok' || !result.data) return;
 
     const data = result.data;
-    let buyCount = 0, sellCount = 0, neutralCount = 0;
+    let buyCount = 0, sellCount = 0, neutralCount = 0, validCount = 0;
 
     Object.values(data).forEach(item => {
         if (item.direction === 'BUY') buyCount++;
         else if (item.direction === 'SELL') sellCount++;
         else neutralCount++;
+        if (item.setup_valid) validCount++;
     });
 
+    const total = buyCount + sellCount + neutralCount;
+    const buyPct = total ? Math.round((buyCount / total) * 100) : 0;
+    const sellPct = total ? Math.round((sellCount / total) * 100) : 0;
+
     container.innerHTML = `
-        <div class="p-3 rounded-lg bg-dark-800/30">
+        <div class="p-3 rounded-xl bg-white/[0.02] border border-white/[0.04]">
             <div class="flex items-center justify-between mb-2">
-                <span class="text-xs text-gray-400">Signal Distribution</span>
-                <span class="text-[10px] text-gray-600">${buyCount + sellCount + neutralCount} pairs</span>
+                <span class="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Distribution</span>
+                <span class="text-[10px] text-gray-600">${total} pairs</span>
+            </div>
+            <div class="flex gap-1.5 h-1.5 rounded-full overflow-hidden mb-3">
+                <div class="bg-green-500 rounded-full" style="width: ${buyPct}%"></div>
+                <div class="bg-red-500 rounded-full" style="width: ${sellPct}%"></div>
+                <div class="bg-gray-500 rounded-full flex-1"></div>
             </div>
             <div class="flex gap-2">
-                <div class="flex-1 p-2 rounded bg-green-500/10 text-center">
+                <div class="flex-1 p-2 rounded-lg bg-green-500/5 text-center">
                     <div class="text-sm font-bold text-green-400">${buyCount}</div>
                     <div class="text-[9px] text-green-500/70">BUY</div>
                 </div>
-                <div class="flex-1 p-2 rounded bg-red-500/10 text-center">
+                <div class="flex-1 p-2 rounded-lg bg-red-500/5 text-center">
                     <div class="text-sm font-bold text-red-400">${sellCount}</div>
                     <div class="text-[9px] text-red-500/70">SELL</div>
                 </div>
-                <div class="flex-1 p-2 rounded bg-gray-500/10 text-center">
+                <div class="flex-1 p-2 rounded-lg bg-white/[0.02] text-center">
                     <div class="text-sm font-bold text-gray-400">${neutralCount}</div>
-                    <div class="text-[9px] text-gray-500/70">HOLD</div>
+                    <div class="text-[9px] text-gray-500">HOLD</div>
                 </div>
             </div>
         </div>
-        <div class="p-3 rounded-lg bg-dark-800/30 mt-2">
-            <div class="text-xs text-gray-500 mb-1">Top Pick</div>
-            ${buyCount > sellCount
-                ? '<span class="text-xs text-green-400">Bullish bias — ' + buyCount + ' buy signals vs ' + sellCount + ' sell</span>'
-                : '<span class="text-xs text-red-400">Bearish bias — ' + sellCount + ' sell signals vs ' + buyCount + ' buy</span>'
-            }
+        <div class="p-3 rounded-xl bg-white/[0.02] border border-white/[0.04] mt-2">
+            <div class="flex items-center justify-between">
+                <span class="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Valid Setups</span>
+                <span class="text-[10px] font-mono ${validCount > 0 ? 'text-green-400' : 'text-gray-500'}">${validCount}/${total}</span>
+            </div>
+            <div class="mt-1.5 text-[10px] ${buyCount > sellCount ? 'text-green-400' : 'text-red-400'}">
+                ${buyCount > sellCount ? 'Bullish bias' : sellCount > buyCount ? 'Bearish bias' : 'Neutral'}
+                — ${buyCount} buy vs ${sellCount} sell
+            </div>
         </div>`;
 }
 
@@ -488,17 +517,13 @@ async function refreshNews(hours) {
     const selectedImpact = impactFilter ? impactFilter.value : 'all';
 
     let filtered = events;
-    if (selectedCurrency !== 'all') {
-        filtered = filtered.filter(e => e.currency === selectedCurrency);
-    }
-    if (selectedImpact !== 'all') {
-        filtered = filtered.filter(e => e.impact && e.impact.toLowerCase().includes(selectedImpact.toLowerCase()));
-    }
+    if (selectedCurrency !== 'all') filtered = filtered.filter(e => e.currency === selectedCurrency);
+    if (selectedImpact !== 'all') filtered = filtered.filter(e => e.impact && e.impact.toLowerCase().includes(selectedImpact.toLowerCase()));
 
     if (filtered.length === 0) {
         container.innerHTML = `
             <div class="flex flex-col items-center justify-center py-12 text-gray-600">
-                <svg class="w-12 h-12 mb-3 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg class="w-8 h-8 mb-2 text-gray-700 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"/>
                 </svg>
                 <span class="text-sm">No events matching filters</span>
@@ -516,14 +541,14 @@ async function refreshNews(hours) {
                         ${isLive ? '<span class="w-2 h-2 rounded-full bg-red-500 animate-pulse mr-2 flex-shrink-0"></span>' : ''}
                         <div class="flex-1 min-w-0">
                             <div class="flex items-center gap-2">
-                                <span class="text-[10px] font-semibold ${isHigh ? 'text-red-400' : 'text-orange-400'}">${e.currency || ''}</span>
-                                <span class="text-[9px] text-gray-500">${e.datetime || ''}</span>
+                                <span class="text-[10px] font-bold ${isHigh ? 'text-red-400' : 'text-orange-400'}">${e.currency || ''}</span>
+                                <span class="text-[9px] text-gray-500 font-mono">${e.datetime || ''}</span>
                                 <span class="text-[9px] text-gray-600">${e.impact || ''}</span>
                             </div>
                             <div class="text-sm text-gray-200 truncate">${e.event || ''}</div>
                             <div class="flex items-center gap-3 mt-0.5 text-[10px] text-gray-500">
-                                ${e.forecast ? `<span>Fcast: ${e.forecast}</span>` : ''}
-                                ${e.previous ? `<span>Prev: ${e.previous}</span>` : ''}
+                                ${e.forecast ? `<span>F: ${e.forecast}</span>` : ''}
+                                ${e.previous ? `<span>P: ${e.previous}</span>` : ''}
                                 ${signalBadge(e.direction, e.direction)}
                             </div>
                         </div>
@@ -542,7 +567,7 @@ async function refreshNewsStats() {
     container.innerHTML = Object.keys(result.data).map(currency => {
         const stats = result.data[currency];
         return `
-            <div class="flex items-center justify-between p-2.5 rounded-lg bg-dark-800/30">
+            <div class="flex items-center justify-between p-2.5 rounded-lg bg-white/[0.02]">
                 <div class="flex items-center gap-2">
                     <span class="w-6 h-4 rounded ${currency === 'USD' ? 'bg-blue-600' : currency === 'EUR' ? 'bg-orange-600' : 'bg-green-600'} text-center text-[9px] leading-4 font-bold text-white">${currency}</span>
                     <span class="text-xs text-gray-400">${stats.total || 0} events</span>
@@ -550,7 +575,7 @@ async function refreshNewsStats() {
                 <div class="flex gap-2 text-[10px]">
                     <span class="text-red-400">${stats.high || 0}H</span>
                     <span class="text-orange-400">${stats.medium || 0}M</span>
-                    <span class="text-blue-400">${stats.upcoming_24h || 0} upcoming</span>
+                    <span class="text-blue-400">${stats.upcoming_24h || 0} soon</span>
                 </div>
             </div>`;
     }).join('');
@@ -559,7 +584,6 @@ async function refreshNewsStats() {
 // ── Analysis Page Functions ──────────────────────────────────────────
 
 async function refreshAnalysis() {
-    // Cross-asset analysis
     const crossResult = await apiFetch('/api/analysis/cross-asset');
     if (crossResult.status === 'ok' && crossResult.data) {
         const d = crossResult.data;
@@ -569,7 +593,6 @@ async function refreshAnalysis() {
         updateElement('correlation-matrix', buildCorrelationMatrix(d.correlations));
     }
 
-    // Regime
     const regimeResult = await apiFetch('/api/analysis/regime');
     if (regimeResult.status === 'ok' && regimeResult.data) {
         updateElement('regime-banner', buildRegimeBanner(regimeResult.data));
@@ -584,27 +607,25 @@ function updateElement(id, html) {
 }
 
 function buildDXYAnalysis(dxy) {
-    if (!dxy) return '<div class="text-gray-600">No DXY data available</div>';
+    if (!dxy) return '<div class="text-gray-600 text-xs">No DXY data</div>';
     const trend = dxy.trend === 'bullish' ? '↑' : '↓';
     const trendColor = dxy.trend === 'bullish' ? 'text-green-400' : 'text-red-400';
     return `
         <div class="flex items-center justify-between">
             <div>
                 <span class="text-2xl font-bold font-mono text-white">${dxy.value?.toFixed(2) || '—'}</span>
-                <span class="ml-2 ${trendColor}">${trend} ${dxy.change?.toFixed(2) || '0'}%</span>
+                <span class="ml-2 ${trendColor} text-sm">${trend} ${dxy.change?.toFixed(2) || '0'}%</span>
             </div>
             <div class="text-right">
-                <div class="text-xs text-gray-500">Range</div>
-                <div class="text-xs font-mono text-gray-400">H: ${dxy.high?.toFixed(2) || '—'} L: ${dxy.low?.toFixed(2) || '—'}</div>
-                <div class="text-[9px] ${dxy.strength === 'very_strong' ? 'text-red-400' : dxy.strength === 'strong' ? 'text-orange-400' : 'text-gray-500'}">${dxy.strength || ''}</div>
+                <div class="text-[10px] text-gray-500">Range</div>
+                <div class="text-[10px] font-mono text-gray-400">H: ${dxy.high?.toFixed(2) || '—'} L: ${dxy.low?.toFixed(2) || '—'}</div>
             </div>
         </div>
         <div class="mt-2 text-xs text-gray-500">DXY ${dxy.trend || 'neutral'} — ${dxy.strength || ''}</div>`;
 }
 
 function buildVIXAnalysis(vix) {
-    if (!vix) return '<div class="text-gray-600">No VIX data available</div>';
-    const riskLabel = vix.risk_on ? 'Risk-On' : 'Risk-Off';
+    if (!vix) return '<div class="text-gray-600 text-xs">No VIX data</div>';
     const riskColor = vix.risk_on ? 'text-green-400' : 'text-red-400';
     return `
         <div class="flex items-center justify-between">
@@ -613,93 +634,85 @@ function buildVIXAnalysis(vix) {
                 <span class="ml-2 text-sm ${vix.change >= 0 ? 'text-red-400' : 'text-green-400'}">${vix.change >= 0 ? '+' : ''}${vix.change?.toFixed(2) || '0'}%</span>
             </div>
             <div class="text-right">
-                <div class="text-xs ${riskColor} font-semibold">${riskLabel}</div>
+                <div class="text-xs ${riskColor} font-semibold">${vix.risk_on ? 'Risk-On' : 'Risk-Off'}</div>
                 <div class="text-[9px] text-gray-500">${vix.regime || ''}</div>
             </div>
-        </div>
-        <div class="mt-2 flex gap-2 text-[10px]">
-            <span class="${vix.value < 15 ? 'text-green-400' : vix.value < 20 ? 'text-yellow-400' : 'text-red-400'}">${vix.value < 12 ? 'Complacent' : vix.value < 20 ? 'Normal' : vix.value < 30 ? 'Fearful' : 'Extreme Fear'}</span>
         </div>`;
 }
 
 function buildYieldAnalysis(yields) {
-    if (!yields) return '<div class="text-gray-600">No yield data available</div>';
-    const status = yields.inverted ? '⚠️ INVERTED' : '✅ Normal';
+    if (!yields) return '<div class="text-gray-600 text-xs">No yield data</div>';
     const statusColor = yields.inverted ? 'text-red-400' : 'text-green-400';
     return `
-        <div class="grid grid-cols-2 gap-3">
-            <div class="p-2 rounded bg-dark-800/30">
-                <div class="text-[9px] text-gray-500">2Y Yield</div>
+        <div class="grid grid-cols-2 gap-2">
+            <div class="p-2 rounded-lg bg-white/[0.02]">
+                <div class="text-[9px] text-gray-500">2Y</div>
                 <div class="text-sm font-mono text-gray-300">${yields['2y_yield']?.toFixed(3) || '—'}%</div>
             </div>
-            <div class="p-2 rounded bg-dark-800/30">
-                <div class="text-[9px] text-gray-500">10Y Yield</div>
+            <div class="p-2 rounded-lg bg-white/[0.02]">
+                <div class="text-[9px] text-gray-500">10Y</div>
                 <div class="text-sm font-mono text-gray-300">${yields['10y_yield']?.toFixed(3) || '—'}%</div>
             </div>
-            <div class="p-2 rounded bg-dark-800/30">
-                <div class="text-[9px] text-gray-500">30Y Yield</div>
+            <div class="p-2 rounded-lg bg-white/[0.02]">
+                <div class="text-[9px] text-gray-500">30Y</div>
                 <div class="text-sm font-mono text-gray-300">${yields['30y_yield']?.toFixed(3) || '—'}%</div>
             </div>
-            <div class="p-2 rounded bg-dark-800/30">
-                <div class="text-[9px] text-gray-500">2-10 Spread</div>
+            <div class="p-2 rounded-lg bg-white/[0.02]">
+                <div class="text-[9px] text-gray-500">2-10</div>
                 <div class="text-sm font-mono ${statusColor}">${yields.spread_2_10?.toFixed(3) || '—'}%</div>
             </div>
         </div>
-        <div class="mt-2 text-xs ${statusColor} font-semibold">${status}</div>
-        ${yields.inverted ? '<div class="mt-1 text-[10px] text-red-400/70">Yield curve inversion historically precedes recessions — defensive positioning advised.</div>' : ''}`;
+        <div class="mt-2 text-xs ${statusColor} font-semibold">${yields.inverted ? 'Yield curve INVERTED' : 'Normal curve'}</div>`;
 }
 
 function buildCorrelationMatrix(correlations) {
     if (!correlations || Object.keys(correlations).length === 0) {
-        return '<div class="text-gray-600">Loading correlations...</div>';
+        return '<div class="text-gray-600 text-xs">Loading correlations...</div>';
     }
     return `
-        <div class="overflow-x-auto">
-            <table class="w-full text-xs">
-                <thead>
-                    <tr class="text-gray-500 border-b border-dark-700/30">
-                        <th class="text-left py-2 px-2">Pair</th>
-                        <th class="text-center py-2 px-2">DXY Corr</th>
-                        <th class="text-center py-2 px-2">Relationship</th>
-                        <th class="text-center py-2 px-2">Strength</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${Object.keys(correlations).map(pair => {
-                        const c = correlations[pair];
-                        const corrColor = c.dxy_correlation < -0.5 ? 'text-red-400' : c.dxy_correlation > 0.5 ? 'text-green-400' : 'text-gray-400';
-                        return `
-                            <tr class="border-b border-dark-700/10">
-                                <td class="py-2 px-2 text-gray-300">${pair.slice(0, 3)}/<span class="text-gray-500">${pair.slice(3)}</span></td>
-                                <td class="text-center py-2 px-2 font-mono ${corrColor}">${c.dxy_correlation?.toFixed(2) || '—'}</td>
-                                <td class="text-center py-2 px-2 text-gray-400">${c.relationship || '—'}</td>
-                                <td class="text-center py-2 px-2">
-                                    <span class="px-1.5 py-0.5 rounded ${c.strength === 'strong' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-500/20 text-gray-400'}">${c.strength || '—'}</span>
-                                </td>
-                            </tr>`;
-                    }).join('')}
-                </tbody>
-            </table>
-            <div class="text-[9px] text-gray-600 mt-2">DXY correlation: negative = inverse relationship (typical for USD pairs)</div>
-        </div>`;
+        <table class="w-full text-xs">
+            <thead>
+                <tr class="text-gray-500 border-b border-white/[0.04]">
+                    <th class="text-left py-2 px-2">Pair</th>
+                    <th class="text-center py-2 px-2">DXY</th>
+                    <th class="text-center py-2 px-2">Relationship</th>
+                    <th class="text-center py-2 px-2">Strength</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${Object.keys(correlations).map(pair => {
+                    const c = correlations[pair];
+                    const corrColor = c.dxy_correlation < -0.5 ? 'text-red-400' : c.dxy_correlation > 0.5 ? 'text-green-400' : 'text-gray-400';
+                    return `
+                        <tr class="border-b border-white/[0.03]">
+                            <td class="py-2 px-2 text-gray-300">${pair.slice(0, 3)}/<span class="text-gray-500">${pair.slice(3)}</span></td>
+                            <td class="text-center py-2 px-2 font-mono ${corrColor}">${c.dxy_correlation?.toFixed(2) || '—'}</td>
+                            <td class="text-center py-2 px-2 text-gray-400">${c.relationship || '—'}</td>
+                            <td class="text-center py-2 px-2">
+                                <span class="px-1.5 py-0.5 rounded ${c.strength === 'strong' ? 'bg-yellow-500/10 text-yellow-400' : 'bg-white/[0.03] text-gray-400'}">${c.strength || '—'}</span>
+                            </td>
+                        </tr>`;
+                }).join('')}
+            </tbody>
+        </table>`;
 }
 
 function buildRegimeBanner(regime) {
-    const bgColors = { 'RISK-ON': 'bg-green-500/10 border-green-500/30', 'DEFENSIVE': 'bg-red-500/10 border-red-500/30', 'NEUTRAL': 'bg-yellow-500/10 border-yellow-500/30' };
+    const bgColors = { 'RISK-ON': 'bg-green-500/5 border-green-500/20', 'DEFENSIVE': 'bg-red-500/5 border-red-500/20', 'NEUTRAL': 'bg-yellow-500/5 border-yellow-500/20' };
     const textColors = { 'RISK-ON': 'text-green-400', 'DEFENSIVE': 'text-red-400', 'NEUTRAL': 'text-yellow-400' };
     const bg = bgColors[regime.regime] || bgColors['NEUTRAL'];
     const tc = textColors[regime.regime] || textColors['NEUTRAL'];
     return `
-        <div class="p-4 rounded-lg ${bg} border">
+        <div class="p-4 rounded-xl ${bg} border">
             <div class="flex items-center justify-between">
                 <div>
-                    <div class="text-xs text-gray-500 mb-1">Current Market Regime</div>
+                    <div class="text-[10px] text-gray-500 mb-1 font-semibold uppercase tracking-wider">Market Regime</div>
                     <div class="text-xl font-bold ${tc}">${regime.regime || 'NEUTRAL'}</div>
                 </div>
-                <div class="text-right text-[10px] text-gray-500">
-                    <div>VIX: ${regime.vix?.toFixed(1) || '—'}</div>
-                    <div>DXY: ${regime.dxy_value?.toFixed(2) || '—'}</div>
-                    <div>Spread: ${regime.yield_spread?.toFixed(3) || '—'}</div>
+                <div class="text-right text-[10px] text-gray-500 font-mono">
+                    <div>VIX ${regime.vix?.toFixed(1) || '—'}</div>
+                    <div>DXY ${regime.dxy_value?.toFixed(2) || '—'}</div>
+                    <div>Spread ${regime.yield_spread?.toFixed(3) || '—'}</div>
                 </div>
             </div>
         </div>`;
@@ -710,8 +723,8 @@ function buildRegimeSignals(signals) {
         return '<div class="text-xs text-gray-500 text-center py-4">No regime signals</div>';
     }
     return signals.map(s => `
-        <div class="p-2.5 rounded-lg bg-dark-800/30 flex items-start gap-2">
-            <span class="text-[9px] px-1.5 py-0.5 rounded flex-shrink-0 ${s.severity === 'high' || s.severity === 'extreme' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'}">${s.type}</span>
+        <div class="p-2.5 rounded-lg bg-white/[0.02] flex items-start gap-2">
+            <span class="text-[9px] px-1.5 py-0.5 rounded flex-shrink-0 ${s.severity === 'high' || s.severity === 'extreme' ? 'bg-red-500/10 text-red-400' : 'bg-yellow-500/10 text-yellow-400'}">${s.type}</span>
             <span class="text-xs text-gray-400">${s.message}</span>
         </div>
     `).join('');
@@ -720,9 +733,9 @@ function buildRegimeSignals(signals) {
 function buildBiasSummary(regime) {
     const rc = regime.regime === 'RISK-ON' ? 'text-green-400' : regime.regime === 'DEFENSIVE' ? 'text-red-400' : 'text-yellow-400';
     return `
-        <div class="p-3 rounded-lg bg-dark-800/30">
-            <div class="text-sm font-semibold ${rc}">${regime.regime || 'NEUTRAL'}</div>
-            <div class="mt-2 space-y-1 text-xs text-gray-500">
+        <div class="p-3 rounded-xl bg-white/[0.02] border border-white/[0.04]">
+            <div class="text-sm font-bold ${rc} mb-2">${regime.regime || 'NEUTRAL'}</div>
+            <div class="space-y-1.5 text-xs text-gray-500">
                 <div class="flex justify-between"><span>Volatility</span><span class="${regime.vix > 20 ? 'text-red-400' : 'text-green-400'}">${regime.vix > 20 ? 'Elevated' : 'Normal'}</span></div>
                 <div class="flex justify-between"><span>Yield Curve</span><span class="${regime.yield_spread < 0 ? 'text-red-400' : 'text-green-400'}">${regime.yield_spread < 0 ? 'Inverted' : 'Normal'}</span></div>
                 <div class="flex justify-between"><span>Risk Appetite</span><span class="${regime.vix < 15 ? 'text-green-400' : 'text-red-400'}">${regime.vix < 15 ? 'Risk-On' : 'Risk-Off'}</span></div>
@@ -751,19 +764,17 @@ function updateLastUpdate() {
 // ── Initialize ────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Check which page we're on
     const path = window.location.pathname;
 
     if (path === '/' || path === '') {
         refreshAll();
-        // Auto-refresh every 30 seconds
         refreshInterval = setInterval(refreshAll, 30000);
     }
 
     if (path === '/signals') {
         refreshSignals();
         refreshSignalSummary();
-        refreshInterval = setInterval(refreshSignals, 30000);
+        refreshInterval = setInterval(() => { refreshSignals(); refreshSignalSummary(); }, 30000);
     }
 
     if (path === '/news') {
@@ -793,7 +804,6 @@ document.addEventListener('DOMContentLoaded', function() {
         refreshNews(hours ? parseInt(hours.dataset.hours) : 72);
     });
 
-    // Time tabs
     document.querySelectorAll('.time-tab').forEach(tab => {
         tab.addEventListener('click', function() {
             document.querySelectorAll('.time-tab').forEach(t => t.classList.remove('active'));

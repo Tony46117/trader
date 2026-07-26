@@ -4,17 +4,18 @@ A comprehensive web framework that:
 - Collects and analyzes high-quality news data
 - Generates live trading signals with entry/SL/TP levels
 - Provides cross-asset analysis (DXY, VIX, Yields)
-- Delivers high-quality setups with snappy precision
+- Delivers high-quality setups with 1:2 minimum RR enforcement
 """
 
 import os
 import sys
-import json
+import time
+import threading
+from functools import wraps
 from datetime import datetime
 
 from flask import Flask, render_template, jsonify, request
 
-# Ensure project root is in path for robust imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import PAIRS, CROSS_ASSETS
@@ -29,58 +30,60 @@ from engine.social_news import get_all_social_signals, get_social_signal
 
 app = Flask(__name__)
 
+# ── In-Memory Cache ────────────────────────────────────────────────
 
-# ── Routes ──────────────────────────────────────────────────────────
+_cache = {}
+_cache_lock = threading.Lock()
+CACHE_TTL = 30  # seconds
+
+
+def cached(ttl=None):
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            key = f.__name__ + str(args) + str(sorted(kwargs.items()))
+            ttl_val = ttl or CACHE_TTL
+            with _cache_lock:
+                if key in _cache:
+                    ts, data = _cache[key]
+                    if time.time() - ts < ttl_val:
+                        return data
+            result = f(*args, **kwargs)
+            with _cache_lock:
+                _cache[key] = (time.time(), result)
+            return result
+        return wrapper
+    return decorator
+
+
+# ── Page Routes ────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
-    """Main dashboard with market overview, signals, and news."""
-    return render_template(
-        "index.html",
-        title="Dashboard",
-        pairs=list(PAIRS.keys()),
-        active_page="dashboard",
-    )
+    return render_template("index.html", title="Dashboard", pairs=list(PAIRS.keys()), active_page="dashboard")
 
 
 @app.route("/signals")
 def signals():
-    """Detailed trading signals page."""
-    return render_template(
-        "signals.html",
-        title="Trading Signals",
-        pairs=list(PAIRS.keys()),
-        active_page="signals",
-    )
+    return render_template("signals.html", title="Trading Signals", pairs=list(PAIRS.keys()), active_page="signals")
 
 
 @app.route("/news")
 def news():
-    """News calendar page."""
-    return render_template(
-        "news.html",
-        title="News Calendar",
-        active_page="news",
-    )
+    return render_template("news.html", title="News Calendar", active_page="news")
 
 
 @app.route("/analysis")
 def analysis():
-    """Cross-asset analysis page."""
-    return render_template(
-        "analysis.html",
-        title="Cross-Asset Analysis",
-        active_page="analysis",
-    )
+    return render_template("analysis.html", title="Cross-Asset Analysis", active_page="analysis")
 
 
 # ── API Routes ──────────────────────────────────────────────────────
 
 @app.route("/api/market/overview")
+@cached(ttl=30)
 def api_market_overview():
-    """API: Get market overview with prices and signals."""
     try:
-        from engine.market_data import get_current_prices
         prices = get_current_prices()
         unified = generate_all_unified_signals()
 
@@ -95,7 +98,6 @@ def api_market_overview():
                 "type": PAIRS[pair_key]["type"],
                 "price": price_data.get("bid", 0),
                 "change": price_data.get("change", 0),
-                # Unified signal
                 "direction": unified_component.get("direction", "NEUTRAL"),
                 "score": unified_component.get("score", 50),
                 "verdict": unified_component.get("verdict", ""),
@@ -105,7 +107,9 @@ def api_market_overview():
                 "sl": sig.get("stop_loss"),
                 "tp1": sig.get("take_profit_1"),
                 "tp2": sig.get("take_profit_2"),
+                "rr1": sig.get("risk_reward_1"),
                 "timing": sig.get("timing", "WAIT"),
+                "setup_valid": sig.get("setup_valid", False),
             }
 
         return jsonify({"status": "ok", "data": overview})
@@ -114,8 +118,8 @@ def api_market_overview():
 
 
 @app.route("/api/signals/unified")
+@cached(ttl=30)
 def api_unified_signals():
-    """API: Get unified signals (technical + news combined) for all pairs."""
     try:
         signals = generate_all_unified_signals()
         return jsonify({"status": "ok", "data": signals})
@@ -124,8 +128,8 @@ def api_unified_signals():
 
 
 @app.route("/api/signals/unified/<pair>")
+@cached(ttl=30)
 def api_unified_signal_pair(pair):
-    """API: Get unified signal for a specific pair."""
     try:
         pair = pair.upper()
         if pair not in PAIRS:
@@ -137,8 +141,8 @@ def api_unified_signal_pair(pair):
 
 
 @app.route("/api/signals/technical")
+@cached(ttl=30)
 def api_technical_signals():
-    """API: Get technical-only signals."""
     try:
         signals = generate_all_technical_signals()
         return jsonify({"status": "ok", "data": signals})
@@ -147,8 +151,8 @@ def api_technical_signals():
 
 
 @app.route("/api/signals/news")
+@cached(ttl=60)
 def api_news_signals():
-    """API: Get news-only signals for each pair."""
     try:
         signals = get_all_news_signals()
         return jsonify({"status": "ok", "data": signals})
@@ -157,10 +161,10 @@ def api_news_signals():
 
 
 @app.route("/api/signals/setups")
+@cached(ttl=30)
 def api_trading_setups():
-    """API: Get top unified trading setups (high confidence)."""
     try:
-        min_score = request.args.get("min_score", 60, type=int)
+        min_score = request.args.get("min_score", 55, type=int)
         max_results = request.args.get("max", 5, type=int)
         setups = get_top_setups(min_score=min_score, max_results=max_results)
         return jsonify({"status": "ok", "data": setups})
@@ -169,23 +173,19 @@ def api_trading_setups():
 
 
 @app.route("/api/news/upcoming")
+@cached(ttl=60)
 def api_upcoming_news():
-    """API: Get upcoming news events."""
     try:
         hours = request.args.get("hours", 72, type=int)
         events = get_all_upcoming_events(hours_ahead=hours)
-        return jsonify({
-            "status": "ok",
-            "data": events,
-            "count": len(events),
-        })
+        return jsonify({"status": "ok", "data": events, "count": len(events)})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
 
 
 @app.route("/api/news/summary")
+@cached(ttl=60)
 def api_news_summary():
-    """API: Get news summary statistics."""
     try:
         summary = get_news_summary()
         return jsonify({"status": "ok", "data": summary})
@@ -194,8 +194,8 @@ def api_news_summary():
 
 
 @app.route("/api/analysis/cross-asset")
+@cached(ttl=60)
 def api_cross_asset():
-    """API: Get cross-asset analysis."""
     try:
         analysis_data = get_cross_asset_analysis()
         return jsonify({"status": "ok", "data": analysis_data})
@@ -204,8 +204,8 @@ def api_cross_asset():
 
 
 @app.route("/api/analysis/regime")
+@cached(ttl=60)
 def api_market_regime():
-    """API: Get current market regime assessment."""
     try:
         regime = get_market_regime()
         return jsonify({"status": "ok", "data": regime})
@@ -214,8 +214,8 @@ def api_market_regime():
 
 
 @app.route("/api/prices")
+@cached(ttl=15)
 def api_prices():
-    """API: Get current prices only."""
     try:
         prices = get_current_prices()
         return jsonify({"status": "ok", "data": prices})
@@ -223,11 +223,9 @@ def api_prices():
         return jsonify({"status": "error", "message": str(e)})
 
 
-# ── Tick Data API ────────────────────────────────────────────────────
-
 @app.route("/api/tick/<pair>")
+@cached(ttl=15)
 def api_tick_data(pair):
-    """API: Get tick-level volatility and momentum for a pair."""
     try:
         pair = pair.upper()
         prices = get_current_prices()
@@ -240,11 +238,9 @@ def api_tick_data(pair):
         return jsonify({"status": "error", "message": str(e)})
 
 
-# ── CME Futures & Options API ────────────────────────────────────────
-
 @app.route("/api/cme")
+@cached(ttl=120)
 def api_cme_all():
-    """API: Get CME futures/options analysis for all pairs."""
     try:
         prices = get_current_prices()
         data = get_all_cme_analysis(prices)
@@ -254,8 +250,8 @@ def api_cme_all():
 
 
 @app.route("/api/cme/<pair>")
+@cached(ttl=120)
 def api_cme_pair(pair):
-    """API: Get CME analysis for a specific pair."""
     try:
         pair = pair.upper()
         from engine.cme_data import get_cme_analysis
@@ -269,11 +265,9 @@ def api_cme_pair(pair):
         return jsonify({"status": "error", "message": str(e)})
 
 
-# ── Social Media Sentiment API ───────────────────────────────────────
-
 @app.route("/api/social")
+@cached(ttl=300)
 def api_social_all():
-    """API: Get social media sentiment for all pairs."""
     try:
         data = get_all_social_signals()
         return jsonify({"status": "ok", "data": data})
@@ -282,8 +276,8 @@ def api_social_all():
 
 
 @app.route("/api/social/<pair>")
+@cached(ttl=300)
 def api_social_pair(pair):
-    """API: Get social media sentiment for a specific pair."""
     try:
         pair = pair.upper()
         data = get_social_signal(pair)
@@ -315,8 +309,8 @@ if __name__ == "__main__":
 ║          FOREX TRADING SIGNAL FRAMEWORK                 ║
 ╠══════════════════════════════════════════════════════════╣
 ║  Pairs: EURUSD, GBPUSD, XAUUSD, BTCUSD, ETHUSD         ║
-║  Features: Live Signals • News Calendar • Cross-Asset   ║
-║  Framework: Flask + Pandas + TA-Lib + yfinance          ║
+║  Min RR: 1:2  •  Cache: 30s  •  5-Source Fusion        ║
+║  Features: Live Signals · News · Cross-Asset · CME      ║
 ╠══════════════════════════════════════════════════════════╣
 ║  🌐  http://localhost:{port}                               ║
 ╚══════════════════════════════════════════════════════════╝

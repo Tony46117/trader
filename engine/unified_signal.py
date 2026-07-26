@@ -8,12 +8,13 @@ Each pair gets signals from:
 - Social media sentiment (Twitter, Truth Social, Reddit) — 10%
 
 Total = high-quality unified signal with entry, SL, TP and conviction scoring.
+Only outputs setups with minimum 1:2 risk-reward ratio.
 """
 
 import numpy as np
 from datetime import datetime
 
-from config import PAIRS
+from config import PAIRS, SIGNAL_CONFIG
 from engine.signal_engine import generate_technical_signal, generate_all_technical_signals
 from engine.news_engine import get_news_signal_for_pair, get_all_news_signals
 from engine.tick_data import get_tick_signal
@@ -28,6 +29,8 @@ WEIGHTS = {
     "cme": 0.15,
     "social": 0.10,
 }
+
+MIN_RR = SIGNAL_CONFIG.get("min_rr_ratio", 2.0)
 
 
 def _score_to_direction(score):
@@ -275,7 +278,10 @@ def generate_all_unified_signals():
 def get_top_setups(min_score=60, max_results=5):
     """Get the best trading setups ranked by unified score.
 
-    Filters for high-confidence setups with clear entry/SL/TP levels.
+    Only returns setups that:
+    1. Have minimum 1:2 risk-reward ratio
+    2. Have a non-NEUTRAL direction
+    3. Meet the minimum score threshold
     """
     all_sigs = generate_all_unified_signals()
     setups = []
@@ -286,29 +292,42 @@ def get_top_setups(min_score=60, max_results=5):
         direction = unified.get("direction", "NEUTRAL")
         confidence = unified.get("confidence", "LOW")
 
-        if direction != "NEUTRAL" and score >= min_score:
-            rr1 = sig.get("risk_reward_1", 0)
-            setup_quality = score * (1.0 if confidence == "HIGH" else 0.8 if confidence == "MEDIUM" else 0.5)
+        if direction == "NEUTRAL":
+            continue
+        if score < min_score:
+            continue
 
-            setups.append({
-                "pair": pair_key,
-                "pair_name": sig.get("pair_name", pair_key),
-                "type": sig.get("type", ""),
-                "score": score,
-                "direction": direction,
-                "verdict": unified.get("verdict", ""),
-                "confidence": confidence,
-                "setup_quality": round(setup_quality, 0),
-                "entry": sig.get("entry_price"),
-                "sl": sig.get("stop_loss"),
-                "tp1": sig.get("take_profit_1"),
-                "tp2": sig.get("take_profit_2"),
-                "rr1": rr1,
-                "timing": sig.get("timing", "PATIENT"),
-                "components": unified.get("components", {}),
-                "current_price": sig.get("current_price"),
-                "cme_levels": sig.get("cme_levels", {}),
-            })
+        # Check 1:2 RR minimum
+        rr1 = sig.get("risk_reward_1", 0)
+        if rr1 < MIN_RR:
+            continue
+
+        setup_quality = score * (1.0 if confidence == "HIGH" else 0.8 if confidence == "MEDIUM" else 0.5)
+
+        setups.append({
+            "pair": pair_key,
+            "pair_name": sig.get("pair_name", pair_key),
+            "type": sig.get("type", ""),
+            "score": score,
+            "direction": direction,
+            "verdict": unified.get("verdict", ""),
+            "confidence": confidence,
+            "setup_quality": round(setup_quality, 0),
+            "entry": sig.get("entry_price"),
+            "sl": sig.get("stop_loss"),
+            "tp1": sig.get("take_profit_1"),
+            "tp2": sig.get("take_profit_2"),
+            "tp3": sig.get("take_profit_3"),
+            "rr1": rr1,
+            "rr2": sig.get("risk_reward_2", 0),
+            "rr3": sig.get("risk_reward_3", 0),
+            "risk_pips": sig.get("risk_pips", 0),
+            "timing": sig.get("timing", "PATIENT"),
+            "components": unified.get("components", {}),
+            "current_price": sig.get("current_price"),
+            "cme_levels": sig.get("cme_levels", {}),
+            "setup_valid": sig.get("setup_valid", False),
+        })
 
     setups.sort(key=lambda x: x["setup_quality"], reverse=True)
     return setups[:max_results]

@@ -29,13 +29,11 @@ def fetch_yahoo_data(ticker, period="1mo", interval="1h"):
 
     try:
         stock = yf.Ticker(ticker)
-        session = requests.Session()
-        # Use concurrent.futures with a timeout to prevent hanging
         from concurrent.futures import ThreadPoolExecutor, TimeoutError
         with ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(
                 stock.history, period=period, interval=interval,
-                auto_adjust=False, session=session
+                auto_adjust=False
             )
             try:
                 df = future.result(timeout=15)
@@ -45,9 +43,6 @@ def fetch_yahoo_data(ticker, period="1mo", interval="1h"):
         if not df.empty:
             df.to_json(cache_path)
         return df
-    except requests.exceptions.Timeout:
-        print(f"⏰ Yahoo fetch timeout for {ticker}")
-        return pd.DataFrame()
     except Exception as e:
         print(f"⚠️ Yahoo fetch error for {ticker}: {e}")
         return pd.DataFrame()
