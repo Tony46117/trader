@@ -22,8 +22,9 @@ try:
         compute_stoch_rsi as _cpp_stoch,
         compute_ema as _cpp_ema,
         compute_sma as _cpp_sma,
+        HAS_CPP as _HAS_CPP,
     )
-    _INDICATORS_CPP = True
+    _INDICATORS_CPP = bool(_HAS_CPP)
 except ImportError:
     pass
 

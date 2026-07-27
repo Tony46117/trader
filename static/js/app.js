@@ -86,6 +86,10 @@ function useSetupsData() {
   return usePolling(() => API.get('/api/signals/setups?min_score=55&max=5'), 30000);
 }
 
+function useNewsEvents() {
+  return usePolling(() => API.get('/api/news/upcoming?hours=48'), 60000);
+}
+
 /* ── Utility Components ────────────────────────────────────────── */
 
 function Loading() {
@@ -132,6 +136,7 @@ function PriceCard({ pair, data }) {
   const changeCls = change >= 0 ? 'positive' : 'negative';
   const cardCls = `price-card ${dir || 'neutral'}`;
   const hasSignal = data.setup_valid || data.active_signal;
+  const agreement = (data.agreement || '').toLowerCase();
 
   return h('div', { className: cardCls },
     h('div', { className: 'price-top' },
@@ -147,19 +152,16 @@ function PriceCard({ pair, data }) {
     h('div', { className: 'price-source' },
       `Source: ${data.source || 'N/A'}`
     ),
-    hasSignal
-      ? h('div', {
-          className: `price-signal badge-${dir || 'neutral'}`,
-          style: { marginTop: '6px' },
-        },
-          data.active_signal ? '🔵 ACTIVE SIGNAL' : `🎯 Score: ${data.score || '—'}`
-        )
-      : null,
-    !data.setup_valid && !data.active_signal
-      ? h('div', { className: 'price-signal', style: { color: 'var(--text-muted)', fontSize: '0.7rem', marginTop: '6px' } },
-          'No setup'
-        )
-      : null,
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', flexWrap: 'wrap' } },
+      hasSignal
+        ? h('span', { className: `price-signal badge-${dir || 'neutral'}` },
+            data.active_signal ? '🔵 ACTIVE' : `🎯 ${data.score || '—'}`
+          )
+        : h('span', { style: { color: 'var(--text-muted)', fontSize: '0.7rem' } }, 'No setup'),
+      agreement === 'aligned'
+        ? h('span', { style: { fontSize: '0.65rem', color: 'var(--accent-green)' } }, '🧠 ALIGNED')  
+        : null,
+    ),
   );
 }
 
@@ -463,6 +465,43 @@ function TopSetupsPanel() {
   );
 }
 
+/* ── News Events Panel ────────────────────────────────────────────── */
+
+function NewsEventsPanel() {
+  const { data: events, loading, error } = useNewsEvents();
+
+  if (loading) return null;
+  if (error || !events || events.length === 0) return null;
+
+  const highImpact = events.filter(e => e.impact === 'HIGH').slice(0, 4);
+  if (highImpact.length === 0) return null;
+
+  return h('div', { className: 'card fade-in', style: { marginBottom: '16px' } },
+    h('div', { className: 'card-header' },
+      h('span', { className: 'card-title' }, '📰 Upcoming High-Impact News'),
+      h(Badge, { text: `${events.length} Events`, variant: 'high' }),
+    ),
+    h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+      ...highImpact.map((evt, i) =>
+        h('div', { key: i, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' } },
+          h('div', { style: { flex: 1 } },
+            h('div', { style: { fontWeight: 600, fontSize: '0.85rem' } }, evt.event),
+            h('div', { style: { fontSize: '0.7rem', color: 'var(--text-muted)' } },
+              `${evt.currency} • ${evt.impact} • ${evt.datetime || evt.date + ' ' + evt.time}`
+            ),
+          ),
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
+            h('span', {
+              style: { fontSize: '0.7rem', fontWeight: 600, color: evt.direction === 'bullish' ? 'var(--accent-green)' : evt.direction === 'bearish' ? 'var(--accent-red)' : 'var(--text-secondary)' }
+            }, (evt.direction || '').toUpperCase()),
+            h('span', { style: { fontSize: '0.65rem', color: 'var(--text-muted)' } }, evt.status === 'upcoming' ? '⏳' : '🔴'),
+          ),
+        )
+      ),
+    ),
+  );
+}
+
 /* ── Signals View ──────────────────────────────────────────────────── */
 
 function SignalsView() {
@@ -472,6 +511,9 @@ function SignalsView() {
   return h('div', { className: 'fade-in' },
     // Active signals panel
     h(ActiveSignalPanel, { signals: active }),
+
+    // News events
+    h(NewsEventsPanel),
 
     // Top setups
     h(TopSetupsPanel),

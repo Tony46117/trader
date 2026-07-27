@@ -32,6 +32,7 @@ from services.signals import (
     generate_all_unified_signals, get_top_setups,
 )
 from services.analysis import get_cross_asset_analysis, get_market_regime
+from providers.news import get_upcoming_events, get_all_news_signals, get_news_signal_for_pair
 from models.state import signal_state_manager
 
 app = Flask(__name__, static_url_path="/static", static_folder="static")
@@ -210,6 +211,33 @@ def api_signal_history(pair=None):
         pair = pair.upper()
     limit = request.args.get("limit", 10, type=int)
     return jsonify({"status": "ok", "data": signal_state_manager.get_history(pair, limit)})
+
+
+# ── News API ────────────────────────────────────────────────────────
+
+@app.route("/api/news/upcoming")
+@cached(ttl=60)
+def api_upcoming_news():
+    hours = request.args.get("hours", 72, type=int)
+    events = get_upcoming_events(hours_ahead=hours)
+    return jsonify({"status": "ok", "data": events, "count": len(events)})
+
+
+@app.route("/api/news/signals")
+@cached(ttl=60)
+def api_news_signals():
+    signals = get_all_news_signals()
+    return jsonify({"status": "ok", "data": signals})
+
+
+@app.route("/api/news/signals/<pair>")
+@cached(ttl=60)
+def api_news_signal_pair(pair):
+    pair = pair.upper()
+    if pair not in PAIRS:
+        return jsonify({"status": "error", "message": f"Invalid pair: {pair}"}), 404
+    signal = get_news_signal_for_pair(pair)
+    return jsonify({"status": "ok", "data": signal})
 
 
 # ── Analysis API ────────────────────────────────────────────────────

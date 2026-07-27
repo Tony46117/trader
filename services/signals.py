@@ -20,6 +20,7 @@ from services.indicators import (
     compute_stoch_rsi, compute_ema, compute_sma, compute_ichimoku,
     compute_pivot_points, compute_support_resistance,
 )
+from providers.news import get_news_signal_for_pair
 from models.state import signal_state_manager
 
 
@@ -335,21 +336,49 @@ def generate_unified_signal(pair_key):
     if tech is None:
         return None
 
-    # Technical signal is the primary driver; other sources (news, tick, CME, social)
-    # can be layered on top for the full 5-source fusion
+    # Fetch news signal for full 5-source fusion
+    news_sig = get_news_signal_for_pair(pair_key)
+    news_score = news_sig.get("score", 50)
+    news_dir = news_sig.get("direction", "NEUTRAL")
+
+    tech_score = tech.get("technical_score", 50)
+    tech_dir = tech.get("technical_direction", "NEUTRAL")
+
+    # Fusion: weighted average of technical + news
+    tech_weight = 0.60
+    news_weight = 0.40
+    fused_score = (tech_score * tech_weight) + (news_score * news_weight)
+
+    # Determine agreement
+    if (tech_dir == "BUY" and news_dir == "BUY") or (tech_dir == "SELL" and news_dir == "SELL"):
+        agreement = "ALIGNED"
+    elif tech_dir == "NEUTRAL" or news_dir == "NEUTRAL":
+        agreement = "PARTIAL"
+    else:
+        agreement = "CONFLICTING"
+
+    # Direction from fused score
+    fused_dir = "BUY" if fused_score >= 60 else "SELL" if fused_score <= 40 else "NEUTRAL"
+
+    # Confidence
+    if fused_score >= 75 and agreement == "ALIGNED":
+        confidence = "HIGH"
+    elif fused_score >= 60 or agreement == "ALIGNED":
+        confidence = "MEDIUM"
+    else:
+        confidence = "LOW"
+
     unified = {
         **tech,
+        "news_signal": news_sig,
         "unified": {
-            "score": tech.get("technical_score", 50),
-            "direction": tech.get("technical_direction", "NEUTRAL"),
-            "confidence": "HIGH" if tech.get("technical_score", 50) >= 70 else "MEDIUM" if tech.get("technical_score", 50) >= 55 else "LOW",
-            "agreement": "ALIGNED",
+            "score": round(fused_score, 0),
+            "direction": fused_dir,
+            "confidence": confidence,
+            "agreement": agreement,
             "components": {
-                "technical": tech.get("technical_score", 50),
-                "news": 50,
-                "tick": 50,
-                "cme": 50,
-                "social": 50,
+                "technical": tech_score,
+                "news": news_score,
             },
         },
     }
