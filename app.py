@@ -35,7 +35,6 @@ from services.analysis import get_cross_asset_analysis, get_market_regime
 from models.state import signal_state_manager
 
 app = Flask(__name__, static_url_path="/static", static_folder="static")
-_check_cpp()
 
 # ── Caching ─────────────────────────────────────────────────────────
 _cache = {}
@@ -224,7 +223,10 @@ def api_cross_asset():
 @app.route("/api/analysis/regime")
 @cached(ttl=60)
 def api_market_regime():
-    return jsonify({"status": "ok", "data": get_market_regime()})# ── C++ Status Check ───────────────────────────────────────────────
+    return jsonify({"status": "ok", "data": get_market_regime()})
+
+
+# ── C++ Status Check ───────────────────────────────────────────────
 
 def _check_cpp():
     """Check and print C++ indicator status."""
