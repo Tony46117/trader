@@ -7,14 +7,14 @@ PYTHON_INCLUDE := $(shell $(PYTHON) -c "from sysconfig import get_path; print(ge
 PYTHON_EXT_SUFFIX := $(shell $(PYTHON) -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))")
 SITE_PACKAGES := $(shell $(PYTHON) -c "import site; print(site.getsitepackages()[0])" 2>/dev/null)
 
-# Fallback include path: check multiple python versions, prefer the host python version
-PYTHON_INCLUDE_FALLBACK := $(shell ls -d /usr/include/python3.14 /usr/include/python3.12 /usr/include/python3.11 /usr/include/python3.10 2>/dev/null | head -1)
-# Also check for python3.14 specifically since that's what's on the system
-HOST_PYTHON_INCLUDE := /usr/include/python3.14
+# Prefer venv's own include directory, fall back to sysconfig
+VENV_INCLUDE := $(shell $(PYTHON) -c "import sys; print(f'{sys.prefix}/include/python{sys.version_info.major}.{sys.version_info.minor}')")
+PYTHON_INCLUDE := $(shell $(PYTHON) -c "from sysconfig import get_path; print(get_path('include'))" 2>/dev/null)
+PYTHON_INCLUDE := $(shell if [ -d "$(VENV_INCLUDE)" ]; then echo "$(VENV_INCLUDE)"; else echo "$(PYTHON_INCLUDE)"; fi)
 
 CXX := g++
 CXXFLAGS := -O3 -Wall -shared -std=c++17 -fPIC
-INCLUDES := -I$(PYTHON_INCLUDE) -I$(PYTHON_INCLUDE_FALLBACK) -I$(HOST_PYTHON_INCLUDE) -I$(PYBIND11_INCLUDE)
+INCLUDES := -I$(PYTHON_INCLUDE) -I$(PYBIND11_INCLUDE)
 
 TARGET := fast_indicators$(PYTHON_EXT_SUFFIX)
 SOURCES := indicators.cpp bindings.cpp

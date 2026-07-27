@@ -23,9 +23,8 @@ CROSS_ASSETS = {
     "DXY": {"name": "US Dollar Index", "yahoo": "DX-Y.NYB"},
     "VIX": {"name": "Volatility Index", "yahoo": "^VIX"},
     "US10Y": {"name": "US 10Y Yield", "yahoo": "^TNX"},
-    "US2Y": {"name": "US 2Y Yield", "yahoo": "^IRX=F"},
-    "US30Y": {"name": "US 30Y Yield", "yahoo": "^TYX"},
     "US5Y": {"name": "US 5Y Yield", "yahoo": "^FVX"},
+    "US30Y": {"name": "US 30Y Yield", "yahoo": "^TYX"},
 }
 
 # News data directory

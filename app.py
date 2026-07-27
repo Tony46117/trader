@@ -57,26 +57,34 @@ def cached(ttl=None):
     return decorator
 
 
-# ── Page Routes ────────────────────────────────────────────────────
+# ── SPA Route ──────────────────────────────────────────────────────
+# Serve the React SPA for all non-API routes
 
-@app.route("/")
-def index():
-    return render_template("index.html", title="Dashboard", pairs=list(PAIRS.keys()), active_page="dashboard")
-
-
-@app.route("/signals")
-def signals():
-    return render_template("signals.html", title="Trading Signals", pairs=list(PAIRS.keys()), active_page="signals")
+SPA_HTML = None
 
 
-@app.route("/news")
-def news():
-    return render_template("news.html", title="News Calendar", active_page="news")
+def load_spa():
+    global SPA_HTML
+    spa_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "index.html")
+    try:
+        with open(spa_path, "r") as f:
+            SPA_HTML = f.read()
+        return True
+    except Exception as e:
+        print(f"⚠️ Could not load SPA: {e}")
+        return False
 
 
-@app.route("/analysis")
-def analysis():
-    return render_template("analysis.html", title="Cross-Asset Analysis", active_page="analysis")
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def serve_spa(path):
+    """Serve the React SPA for any non-API route."""
+    # Skip API routes
+    if path.startswith("api/"):
+        return jsonify({"status": "error", "message": "Not found"}), 404
+    if SPA_HTML is None:
+        load_spa()
+    return SPA_HTML or "<html><body><h1>Loading...</h1></body></html>"
 
 
 # ── API Routes ──────────────────────────────────────────────────────

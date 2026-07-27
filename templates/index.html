@@ -1,133 +1,19 @@
-{% extends "base.html" %}
-
-{% block content %}
-<!-- Market Overview Cards -->
-<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6" id="market-overview">
-    {% for pair in pairs %}
-    <div class="pair-card" data-pair="{{ pair }}" id="card-{{ pair }}">
-        <div class="invalid-badge hidden absolute top-2 right-2 text-[8px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 font-bold z-10">NO SETUP</div>
-        <div class="flex items-center justify-between mb-2">
-            <span class="text-xs font-bold text-gray-200 tracking-wide">{{ pair[:3] }}/<span class="text-gray-500 font-medium">{{ pair[3:] }}</span></span>
-            <span class="text-[9px] text-gray-600 uppercase tracking-wider">{{ loop.cycle('forex', 'forex', 'commodity', 'crypto', 'crypto') }}</span>
-        </div>
-        <div class="text-xl font-bold font-mono text-white pair-price leading-none">—</div>
-        <div class="flex items-center justify-between mt-2">
-            <span class="text-[11px] font-mono pair-change text-gray-500">—</span>
-            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full pair-direction">—</span>
-        </div>
-        <div class="mt-2.5 pt-2.5 border-t border-white/5 flex justify-between text-[10px]">
-            <span class="text-gray-600">SL <span class="pair-sl font-mono text-red-400/80">—</span></span>
-            <span class="text-gray-600">TP <span class="pair-tp font-mono text-green-400/80">—</span></span>
-        </div>
-        <div class="mt-1.5 text-right">
-            <span class="text-[9px]" style="color: var(--text-muted);">R:R </span><span class="pair-rr font-mono text-[10px]">—</span>
-        </div>
-        <div class="mt-1 pair-signal-state"></div>
-    </div>
-    {% endfor %}
-</div>
-
-<!-- Main Grid: Signals + News + Regime -->
-<div class="grid grid-cols-12 gap-5">
-    <!-- Active Signals Column -->
-    <div class="col-span-12 lg:col-span-8 space-y-4">
-        <!-- Active Setups -->
-        <div class="section-card">
-            <div class="flex items-center justify-between mb-4">
-                <h3 class="text-sm font-bold text-white flex items-center gap-2">
-                    <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                    Active Setups
-                    <span class="text-[9px] text-gray-600 font-normal ml-1">min 1:2 RR</span>
-                </h3>
-                <span class="text-[10px] text-gray-500 font-mono" id="setup-count">Loading...</span>
-            </div>
-            <div id="setups-container">
-                <div class="flex items-center justify-center py-12 text-gray-600">
-                    <svg class="animate-spin h-5 w-5 mr-3 opacity-50" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                    <span class="text-xs">Analyzing markets...</span>
-                </div>
-            </div>
-        </div>
-
-        <!-- Unified Signal Matrix -->
-        <div class="section-card">
-            <div class="flex items-center justify-between mb-4">
-                <h3 class="text-sm font-bold text-white flex items-center gap-2">
-                    <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
-                    Signal Matrix
-                </h3>
-                <span class="text-[9px] text-gray-600">5-source fusion: Tech + News + Tick + CME + Social</span>
-            </div>
-            <div class="overflow-x-auto">
-                <table class="w-full text-xs" id="unified-signal-matrix">
-                    <thead>
-                        <tr class="text-gray-500 border-b border-white/5">
-                            <th class="text-left py-2.5 px-2 font-medium">Pair</th>
-                            <th class="text-right py-2.5 px-2 font-medium">Price</th>
-                            <th class="text-center py-2.5 px-2 font-medium" colspan="2">Tech</th>
-                            <th class="text-center py-2.5 px-2 font-medium" colspan="2">News</th>
-                            <th class="text-center py-2.5 px-2 font-medium">Signal</th>
-                            <th class="text-right py-2.5 px-2 font-medium">Entry</th>
-                            <th class="text-right py-2.5 px-2 font-medium">SL</th>
-                            <th class="text-right py-2.5 px-2 font-medium">TP</th>
-                            <th class="text-center py-2.5 px-2 font-medium">R:R</th>
-                            <th class="text-center py-2.5 px-2 font-medium">Time</th>
-                        </tr>
-                    </thead>
-                    <tbody id="unified-signal-body">
-                        <tr><td colspan="12" class="text-center py-8 text-gray-600 text-xs">Loading signals...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <!-- Right Sidebar -->
-    <div class="col-span-12 lg:col-span-4 space-y-4">
-        <!-- Market Regime -->
-        <div class="section-card" id="regime-card">
-            <h3 class="text-sm font-bold text-white mb-3 flex items-center gap-2">
-                <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
-                Market Regime
-            </h3>
-            <div class="space-y-3" id="regime-content">
-                <div class="animate-pulse space-y-2">
-                    <div class="h-4 bg-white/5 rounded w-3/4"></div>
-                    <div class="h-3 bg-white/5 rounded w-1/2"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Cross-Asset -->
-        <div class="section-card">
-            <h3 class="text-sm font-bold text-white mb-3 flex items-center gap-2">
-                <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
-                Cross-Asset
-            </h3>
-            <div class="space-y-2" id="cross-asset-snapshot">
-                <div class="animate-pulse space-y-2">
-                    <div class="h-8 bg-white/5 rounded"></div>
-                    <div class="h-8 bg-white/5 rounded"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Upcoming News -->
-        <div class="section-card">
-            <div class="flex items-center justify-between mb-3">
-                <h3 class="text-sm font-bold text-white flex items-center gap-2">
-                    <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                    News
-                </h3>
-                <a href="/news" class="text-[10px] text-gray-500 hover:text-white transition-colors">View All →</a>
-            </div>
-            <div id="news-preview">
-                <div class="animate-pulse space-y-2">
-                    <div class="h-10 bg-white/5 rounded"></div>
-                    <div class="h-10 bg-white/5 rounded"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-{% endblock %}
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trader — Signal Framework</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/custom.css?v=2">
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="/static/js/app.js?v=2"></script>
+</body>
+</html>
