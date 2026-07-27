@@ -5,14 +5,10 @@ Fetches live and historical data for forex, commodities, and crypto.
 import time
 import json
 import os
-import logging
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
-# Suppress yfinance's noisy stderr output
-logging.getLogger('yfinance').setLevel(logging.CRITICAL)
-import yfinance as yf
 import ccxt
 import requests
 

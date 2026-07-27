@@ -10,3 +10,4 @@ venv/
 .env
 instructions.txt
 .vscode/
+data/
