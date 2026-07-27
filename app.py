@@ -1,12 +1,19 @@
-"""Forex Trading Signal Framework — Main Application.
-
-A comprehensive web framework that:
-- Collects and analyzes high-quality news data
-- Generates live trading signals with entry/SL/TP levels
-- Provides cross-asset analysis (DXY, VIX, Yields)
-- Delivers high-quality setups with 1:2 minimum RR enforcement
 """
-
+╔══════════════════════════════════════════════════════════╗
+║                   TRADER v2                             ║
+║          Forex Trading Signal Framework                 ║
+╠══════════════════════════════════════════════════════════╣
+║  A comprehensive trading framework that:                ║
+║  - Collects live market data (Yahoo + Crypto)           ║
+║  - Generates trading signals with 5-source fusion       ║
+║  - Enforces minimum 1:2 risk-reward on all setups       ║
+║  - Provides cross-asset & market regime analysis        ║
+║  - Tracks active signals with SL/TP hit detection       ║
+╠══════════════════════════════════════════════════════════╣
+║  Pairs: EURUSD, GBPUSD, XAUUSD, BTCUSD, ETHUSD         ║
+║  Cache: 30s  |  Min RR: 1:2  |  5-Source Fusion        ║
+╚══════════════════════════════════════════════════════════╝
+"""
 import os
 import sys
 import time
@@ -14,28 +21,25 @@ import threading
 from functools import wraps
 from datetime import datetime
 
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, jsonify, request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from config import PAIRS, CROSS_ASSETS
-from engine.market_data import get_current_prices, get_cross_asset_data
-from engine.news_engine import get_all_upcoming_events, get_news_summary, load_news_data, get_all_news_signals
-from engine.signal_engine import generate_all_technical_signals
-from engine.unified_signal import generate_unified_signal, generate_all_unified_signals, get_top_setups
-from engine.cross_asset import get_cross_asset_analysis, get_market_regime
-from engine.tick_data import get_tick_signal
-from engine.cme_data import get_all_cme_analysis
-from engine.social_news import get_all_social_signals, get_social_signal
-from engine.signal_state import signal_state_manager
+from config import PAIRS, CACHE_TTL
+from services.market import get_current_prices, get_cross_asset_data
+from services.signals import (
+    generate_all_technical_signals, generate_unified_signal,
+    generate_all_unified_signals, get_top_setups,
+)
+from services.analysis import get_cross_asset_analysis, get_market_regime
+from models.state import signal_state_manager
 
-app = Flask(__name__)
+app = Flask(__name__, static_url_path="/static", static_folder="static")
+_check_cpp()
 
-# ── In-Memory Cache ────────────────────────────────────────────────
-
+# ── Caching ─────────────────────────────────────────────────────────
 _cache = {}
 _cache_lock = threading.Lock()
-CACHE_TTL = 30  # seconds
 
 
 def cached(ttl=None):
@@ -45,10 +49,8 @@ def cached(ttl=None):
             key = f.__name__ + str(args) + str(sorted(kwargs.items()))
             ttl_val = ttl or CACHE_TTL
             with _cache_lock:
-                if key in _cache:
-                    ts, data = _cache[key]
-                    if time.time() - ts < ttl_val:
-                        return data
+                if key in _cache and time.time() - _cache[key][0] < ttl_val:
+                    return _cache[key][1]
             result = f(*args, **kwargs)
             with _cache_lock:
                 _cache[key] = (time.time(), result)
@@ -57,37 +59,41 @@ def cached(ttl=None):
     return decorator
 
 
-# ── SPA Route ──────────────────────────────────────────────────────
-# Serve the React SPA for all non-API routes
-
-SPA_HTML = None
+# ── SPA Serving ─────────────────────────────────────────────────────
+_SPA_HTML = None
 
 
-def load_spa():
-    global SPA_HTML
+def _load_spa():
+    global _SPA_HTML
     spa_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "index.html")
     try:
-        with open(spa_path, "r") as f:
-            SPA_HTML = f.read()
+        with open(spa_path) as f:
+            _SPA_HTML = f.read()
         return True
-    except Exception as e:
-        print(f"⚠️ Could not load SPA: {e}")
+    except Exception:
+        _SPA_HTML = "<html><body><h1>Trader Loading...</h1></body></html>"
         return False
 
 
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def serve_spa(path):
-    """Serve the React SPA for any non-API route."""
-    # Skip API routes
     if path.startswith("api/"):
         return jsonify({"status": "error", "message": "Not found"}), 404
-    if SPA_HTML is None:
-        load_spa()
-    return SPA_HTML or "<html><body><h1>Loading...</h1></body></html>"
+    if path.startswith("static/"):
+        return app.send_static_file(path[8:]) if os.path.exists(os.path.join("static", path[8:])) else ("Not found", 404)
+    if _SPA_HTML is None:
+        _load_spa()
+    return _SPA_HTML
 
 
-# ── API Routes ──────────────────────────────────────────────────────
+# ── Market Data API ─────────────────────────────────────────────────
+
+@app.route("/api/prices")
+@cached(ttl=15)
+def api_prices():
+    return jsonify({"status": "ok", "data": get_current_prices()})
+
 
 @app.route("/api/market/overview")
 @cached(ttl=30)
@@ -95,38 +101,36 @@ def api_market_overview():
     try:
         prices = get_current_prices()
         unified = generate_all_unified_signals()
-
         overview = {}
+
         for pair_key in PAIRS:
             price_data = prices.get(pair_key, {})
             sig = unified.get(pair_key, {})
-            unified_component = sig.get("unified", {})
+            uni = sig.get("unified", {}) if isinstance(sig, dict) else {}
             current = price_data.get("bid", 0)
 
-            # Check SL/TP hits on each refresh
             pair_info = PAIRS.get(pair_key, {})
             pip_size = pair_info.get("pip", 0.0001)
             if current > 0:
-                signal_state_manager.check_price_levels(pair_key, current, pip_size)
+                signal_state_manager.check_price_levels(pair_key, current)
 
-            # Re-check active signal after potential hit
             active = signal_state_manager.get_active_signal(pair_key)
 
             overview[pair_key] = {
-                "name": PAIRS[pair_key]["name"],
-                "type": PAIRS[pair_key]["type"],
+                "name": pair_info.get("name", pair_key),
+                "type": pair_info.get("type", "unknown"),
                 "price": current,
                 "change": price_data.get("change", 0),
-                "direction": unified_component.get("direction", "NEUTRAL"),
-                "score": unified_component.get("score", 50),
-                "verdict": unified_component.get("verdict", ""),
-                "confidence": unified_component.get("confidence", "LOW"),
-                "agreement": unified_component.get("agreement", ""),
-                "entry": sig.get("entry_price"),
-                "sl": sig.get("stop_loss"),
-                "tp1": sig.get("take_profit_1"),
-                "tp2": sig.get("take_profit_2"),
-                "rr1": sig.get("risk_reward_1"),
+                "direction": uni.get("direction", "NEUTRAL"),
+                "score": uni.get("score", 50),
+                "verdict": uni.get("verdict", ""),
+                "confidence": uni.get("confidence", "LOW"),
+                "agreement": uni.get("agreement", ""),
+                "entry": sig.get("entry_price") or sig.get("entry"),
+                "sl": sig.get("stop_loss") or sig.get("sl"),
+                "tp1": sig.get("take_profit_1") or sig.get("tp1"),
+                "tp2": sig.get("take_profit_2") or sig.get("tp2"),
+                "rr1": sig.get("risk_reward_1") or sig.get("rr1"),
                 "timing": sig.get("timing", "WAIT"),
                 "setup_valid": sig.get("setup_valid", False),
                 "signal_state": sig.get("signal_state", {}),
@@ -138,231 +142,100 @@ def api_market_overview():
         return jsonify({"status": "error", "message": str(e)})
 
 
+# ── Signals API ─────────────────────────────────────────────────────
+
 @app.route("/api/signals/unified")
 @cached(ttl=30)
 def api_unified_signals():
-    try:
-        signals = generate_all_unified_signals()
-        return jsonify({"status": "ok", "data": signals})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
+    return jsonify({"status": "ok", "data": generate_all_unified_signals()})
 
 
 @app.route("/api/signals/unified/<pair>")
 @cached(ttl=30)
 def api_unified_signal_pair(pair):
-    try:
-        pair = pair.upper()
-        if pair not in PAIRS:
-            return jsonify({"status": "error", "message": f"Invalid pair: {pair}"})
-        signal = generate_unified_signal(pair)
-        return jsonify({"status": "ok", "data": signal})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
+    pair = pair.upper()
+    if pair not in PAIRS:
+        return jsonify({"status": "error", "message": f"Invalid pair: {pair}"}), 404
+    return jsonify({"status": "ok", "data": generate_unified_signal(pair)})
 
 
 @app.route("/api/signals/technical")
 @cached(ttl=30)
 def api_technical_signals():
-    try:
-        signals = generate_all_technical_signals()
-        return jsonify({"status": "ok", "data": signals})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
-
-
-@app.route("/api/signals/news")
-@cached(ttl=60)
-def api_news_signals():
-    try:
-        signals = get_all_news_signals()
-        return jsonify({"status": "ok", "data": signals})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
+    return jsonify({"status": "ok", "data": generate_all_technical_signals()})
 
 
 @app.route("/api/signals/setups")
 @cached(ttl=30)
 def api_trading_setups():
-    try:
-        min_score = request.args.get("min_score", 55, type=int)
-        max_results = request.args.get("max", 5, type=int)
-        setups = get_top_setups(min_score=min_score, max_results=max_results)
-        return jsonify({"status": "ok", "data": setups})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
+    min_score = request.args.get("min_score", 55, type=int)
+    max_results = request.args.get("max", 5, type=int)
+    return jsonify({"status": "ok", "data": get_top_setups(min_score=min_score, max_results=max_results)})
 
 
-@app.route("/api/news/upcoming")
-@cached(ttl=60)
-def api_upcoming_news():
-    try:
-        hours = request.args.get("hours", 72, type=int)
-        events = get_all_upcoming_events(hours_ahead=hours)
-        return jsonify({"status": "ok", "data": events, "count": len(events)})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
-
-
-@app.route("/api/news/summary")
-@cached(ttl=60)
-def api_news_summary():
-    try:
-        summary = get_news_summary()
-        return jsonify({"status": "ok", "data": summary})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
-
-
-@app.route("/api/analysis/cross-asset")
-@cached(ttl=60)
-def api_cross_asset():
-    try:
-        analysis_data = get_cross_asset_analysis()
-        return jsonify({"status": "ok", "data": analysis_data})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
-
-
-@app.route("/api/analysis/regime")
-@cached(ttl=60)
-def api_market_regime():
-    try:
-        regime = get_market_regime()
-        return jsonify({"status": "ok", "data": regime})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
-
-
-@app.route("/api/prices")
-@cached(ttl=15)
-def api_prices():
-    try:
-        prices = get_current_prices()
-        return jsonify({"status": "ok", "data": prices})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
-
-
-@app.route("/api/tick/<pair>")
-@cached(ttl=15)
-def api_tick_data(pair):
-    try:
-        pair = pair.upper()
-        prices = get_current_prices()
-        price = prices.get(pair, {}).get("bid", 0)
-        if price == 0:
-            return jsonify({"status": "error", "message": f"No price data for {pair}"})
-        signal = get_tick_signal(pair, price)
-        return jsonify({"status": "ok", "data": signal})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
-
-
-@app.route("/api/cme")
-@cached(ttl=120)
-def api_cme_all():
-    try:
-        prices = get_current_prices()
-        data = get_all_cme_analysis(prices)
-        return jsonify({"status": "ok", "data": data})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
-
-
-@app.route("/api/cme/<pair>")
-@cached(ttl=120)
-def api_cme_pair(pair):
-    try:
-        pair = pair.upper()
-        from engine.cme_data import get_cme_analysis
-        prices = get_current_prices()
-        price = prices.get(pair, {}).get("bid", 1.0)
-        if price == 0:
-            price = 1.0
-        data = get_cme_analysis(pair, price)
-        return jsonify({"status": "ok", "data": data})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
-
-
-@app.route("/api/social")
-@cached(ttl=300)
-def api_social_all():
-    try:
-        data = get_all_social_signals()
-        return jsonify({"status": "ok", "data": data})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
-
-
-@app.route("/api/social/<pair>")
-@cached(ttl=300)
-def api_social_pair(pair):
-    try:
-        pair = pair.upper()
-        data = get_social_signal(pair)
-        return jsonify({"status": "ok", "data": data})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
-
-
-# ── Signal State Endpoints ────────────────────────────────────────
+# ── Signal State API ────────────────────────────────────────────────
 
 @app.route("/api/signals/active")
 def api_active_signals():
-    try:
-        signals = signal_state_manager.get_all_active_signals()
-        return jsonify({"status": "ok", "data": signals})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
+    return jsonify({"status": "ok", "data": signal_state_manager.get_all_active_signals()})
 
 
 @app.route("/api/signals/active/<pair>")
 def api_active_signal_pair(pair):
-    try:
-        pair = pair.upper()
-        signal = signal_state_manager.get_active_signal(pair)
-        return jsonify({"status": "ok", "data": signal})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
+    pair = pair.upper()
+    return jsonify({"status": "ok", "data": signal_state_manager.get_active_signal(pair)})
 
 
 @app.route("/api/signals/close/<pair>", methods=["POST"])
 def api_close_signal(pair):
-    try:
-        pair = pair.upper()
-        data = request.get_json(silent=True) or {}
-        reason = data.get("reason", "MANUAL_CLOSE")
-        result = signal_state_manager.close_signal(pair, reason)
-        if result:
-            return jsonify({"status": "ok", "data": result})
-        return jsonify({"status": "error", "message": f"No active signal for {pair}"})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
+    pair = pair.upper()
+    data = request.get_json(silent=True) or {}
+    reason = data.get("reason", "MANUAL_CLOSE")
+    result = signal_state_manager.close_signal(pair, reason)
+    if result:
+        return jsonify({"status": "ok", "data": result})
+    return jsonify({"status": "error", "message": f"No active signal for {pair}"}), 404
 
 
 @app.route("/api/signals/force/<pair>", methods=["POST"])
 def api_force_new_signal(pair):
-    try:
-        pair = pair.upper()
-        signal_state_manager.force_new_signal(pair)
-        return jsonify({"status": "ok", "message": f"Force-closed signal for {pair}"})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
+    pair = pair.upper()
+    signal_state_manager.force_new_signal(pair)
+    return jsonify({"status": "ok", "message": f"Force-closed signal for {pair}"})
 
 
 @app.route("/api/signals/history")
 @app.route("/api/signals/history/<pair>")
 def api_signal_history(pair=None):
+    if pair:
+        pair = pair.upper()
+    limit = request.args.get("limit", 10, type=int)
+    return jsonify({"status": "ok", "data": signal_state_manager.get_history(pair, limit)})
+
+
+# ── Analysis API ────────────────────────────────────────────────────
+
+@app.route("/api/analysis/cross-asset")
+@cached(ttl=60)
+def api_cross_asset():
+    return jsonify({"status": "ok", "data": get_cross_asset_analysis()})
+
+
+@app.route("/api/analysis/regime")
+@cached(ttl=60)
+def api_market_regime():
+    return jsonify({"status": "ok", "data": get_market_regime()})# ── C++ Status Check ───────────────────────────────────────────────
+
+def _check_cpp():
+    """Check and print C++ indicator status."""
     try:
-        if pair:
-            pair = pair.upper()
-        limit = request.args.get("limit", 10, type=int)
-        history = signal_state_manager.get_history(pair, limit)
-        return jsonify({"status": "ok", "data": history})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
+        from services.indicators import _INDICATORS_CPP
+        if _INDICATORS_CPP:
+            print("  ⚡ C++ indicators: ACCELERATED")
+        else:
+            print("  ⚡ C++ indicators: pure Python (install python3.12-devel & recompile for speed)")
+    except Exception:
+        print("  ⚡ C++ indicators: pure Python")
 
 
 # ── Error Handlers ──────────────────────────────────────────────────
@@ -385,14 +258,17 @@ if __name__ == "__main__":
 
     print(f"""
 ╔══════════════════════════════════════════════════════════╗
-║          FOREX TRADING SIGNAL FRAMEWORK                 ║
+║                   TRADER v2                             ║
+║          Forex Trading Signal Framework                 ║
 ╠══════════════════════════════════════════════════════════╣
 ║  Pairs: EURUSD, GBPUSD, XAUUSD, BTCUSD, ETHUSD         ║
-║  Min RR: 1:2  •  Cache: 30s  •  5-Source Fusion        ║
-║  Features: Live Signals · News · Cross-Asset · CME      ║
+║  Min RR: 1:2  •  Cache: {str(CACHE_TTL)+'s':>7}  •  5-Source Fusion        ║
+║  Features: Live Prices · Signals · Analysis · CME       ║
 ╠══════════════════════════════════════════════════════════╣
 ║  🌐  http://localhost:{port}                               ║
 ╚══════════════════════════════════════════════════════════╝
 """)
+
+    _check_cpp()
 
     app.run(host="0.0.0.0", port=port, debug=debug)

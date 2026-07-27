@@ -1,13 +1,37 @@
+# Python
 *.pyc
 __pycache__/
-*.so
-*.o
-data/cache/*
-data/news/*
-venv/
-.venv/
 *.egg-info/
 .env
-instructions.txt
+venv/
+.venv/
+
+# Build
+*.so
+*.o
+*.manifest
+
+# Data
+data/cache/*
+data/news/*
+!data/cache/.gitkeep
+!data/news/.gitkeep
+
+# IDE
 .vscode/
-data/
+.idea/
+*.swp
+*.swo
+
+# Secrets
+instructions.txt
+.env
+*.key
+*.pem
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project
+*.log

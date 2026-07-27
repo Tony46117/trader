@@ -1,942 +1,613 @@
-/* =============================================================
-   TRADER — React SPA Frontend
-   Professional Trading Signal Framework
-   ============================================================= */
+/**
+ * ══════════════════════════════════════════════════════════
+ *   TRADER v2 — React SPA
+ *   Forex Trading Signal Framework Frontend
+ * ══════════════════════════════════════════════════════════
+ *   Views: Dashboard · Signals · Analysis
+ *   Features: Live price tiles · Signal fusion cards ·
+ *   Cross-asset analysis · Active signal tracking · 
+ *   Auto-refresh with 30s polling
+ * ══════════════════════════════════════════════════════════
+ */
 
 const { useState, useEffect, useCallback, useRef, createElement: h } = React;
 
-/* ── Utility ── */
-const API_BASE = '/api';
-const PAIRS_LIST = ['EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSD', 'ETHUSD'];
+/* ── API Client ────────────────────────────────────────────────── */
+const API = {
+  async get(url) {
+    const res = await fetch(url);
+    const json = await res.json();
+    if (json.status !== 'ok') throw new Error(json.message || 'API error');
+    return json.data;
+  },
+  async post(url, body = {}) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    if (json.status !== 'ok') throw new Error(json.message || 'API error');
+    return json;
+  },
+};
 
-async function fetchJSON(url) {
-  const res = await fetch(API_BASE + url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
-  if (json.status === 'error') throw new Error(json.message || 'API error');
-  return json.data;
+/* ── Hooks ─────────────────────────────────────────────────────── */
+
+function usePolling(fn, interval = 30000) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+    async function poll() {
+      try {
+        const result = await fn();
+        if (mounted) {
+          setData(result);
+          setError(null);
+        }
+      } catch (e) {
+        if (mounted) setError(e.message);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+    poll();
+    const id = setInterval(poll, interval);
+    return () => { mounted = false; clearInterval(id); };
+  }, []);
+
+  return { data, loading, error };
 }
 
-function cls(...parts) { return parts.filter(Boolean).join(' '); }
-
-function fmtPrice(v, pairType = 'forex') {
-  if (v == null || v === 0) return '—';
-  return pairType === 'forex' ? v.toFixed(5) : v.toFixed(2);
+function usePriceData() {
+  return usePolling(() => API.get('/api/market/overview'), 30000);
 }
 
-function fmtPct(v) {
-  if (v == null) return '—';
-  const s = v >= 0 ? '+' : '';
-  return `${s}${v.toFixed(2)}%`;
+function useSignalsData() {
+  return usePolling(() => API.get('/api/signals/unified'), 30000);
 }
 
-function fmtScore(v) {
-  if (v == null) return '—';
-  return Math.round(v).toString();
+function useActiveSignals() {
+  return usePolling(() => API.get('/api/signals/active'), 15000);
 }
 
-function scoreColor(v) {
-  if (v == null) return 'var(--neutral)';
-  if (v >= 65) return 'var(--buy)';
-  if (v <= 35) return 'var(--sell)';
-  return 'var(--neutral)';
+function useAnalysisData() {
+  return usePolling(() => API.get('/api/analysis/cross-asset'), 30000);
 }
 
-function directionBadge(dir) {
-  const d = (dir || 'NEUTRAL').toUpperCase();
-  if (d === 'BUY' || d === 'BULLISH') return 'buy';
-  if (d === 'SELL' || d === 'BEARISH') return 'sell';
-  return 'neutral';
+function useRegimeData() {
+  return usePolling(() => API.get('/api/analysis/regime'), 60000);
 }
 
-/* ── Loading Spinner ── */
-function Loading({ text = 'Loading...' }) {
-  return h('div', { className: 'loading' },
-    h('div', { className: 'spinner' }),
-    text
+function useSetupsData() {
+  return usePolling(() => API.get('/api/signals/setups?min_score=55&max=5'), 30000);
+}
+
+/* ── Utility Components ────────────────────────────────────────── */
+
+function Loading() {
+  return h('div', { className: 'loading-container' },
+    h('div', { className: 'loading-spinner' }),
+    h('span', { style: { color: 'var(--text-secondary)', fontSize: '0.85rem' } }, 'Loading market data...')
   );
 }
 
 function ErrorMsg({ message }) {
-  return message ? h('div', { className: 'error-msg' }, message) : null;
-}
-
-function NoData({ text = 'No data available' }) {
-  return h('div', { className: 'no-data' }, text);
-}
-
-/* ── Navigation ── */
-function Nav({ activeTab, onTabChange, theme, onThemeToggle, status }) {
-  const tabs = [
-    { id: 'dashboard', label: 'Dashboard' },
-    { id: 'signals', label: 'Signals' },
-    { id: 'news', label: 'News' },
-    { id: 'analysis', label: 'Analysis' },
-  ];
-
-  return h('nav', { className: 'nav' },
-    h('div', { className: 'nav-inner' },
-      h('div', { className: 'nav-left' },
-        h('div', { className: 'nav-logo' },
-          h('span', { className: 'logo-dot' }),
-          'TRADER'
-        ),
-        h('ul', { className: 'nav-links' },
-          tabs.map(tab =>
-            h('li', { key: tab.id },
-              h('a', {
-                href: '#',
-                className: cls(activeTab === tab.id && 'active'),
-                onClick: (e) => { e.preventDefault(); onTabChange(tab.id); }
-              }, tab.label)
-            )
-          )
-        )
-      ),
-      h('div', { className: 'nav-right' },
-        h('div', { className: 'nav-status' },
-          h('span', { className: cls('dot', status === 'ok' ? 'live' : 'offline') }),
-          status === 'ok' ? 'LIVE' : 'OFFLINE'
-        ),
-        h('button', {
-          className: 'theme-toggle',
-          onClick: onThemeToggle,
-          title: theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'
-        },
-          h('span', { className: 'icon' }, theme === 'dark' ? '\u2600' : '\u263E'),
-          theme === 'dark' ? 'LIGHT' : 'DARK'
-        )
-      )
-    )
+  return h('div', { className: 'card', style: { textAlign: 'center', padding: '40px' } },
+    h('div', { style: { fontSize: '2rem', marginBottom: '8px' } }, '⚠️'),
+    h('p', { style: { color: 'var(--accent-red)' } }, message || 'Failed to load data')
   );
 }
 
-/* ── Market Regime Bar ── */
-function RegimeBar({ regime }) {
-  if (!regime) return null;
-  const dxy = regime.dxy || {};
-  const vix = regime.vix || {};
-  const yields = regime.yields || {};
-
-  return h('div', { className: 'regime-bar' },
-    h('div', { className: 'regime-item' },
-      h('div', { className: 'label' }, 'DXY'),
-      h('div', { className: 'value', style: { color: 'var(--accent)' } },
-        dxy.value != null ? dxy.value.toFixed(2) : '—'
-      ),
-      h('div', { className: cls('change', (dxy.change || 0) >= 0 ? 'pos' : 'neg') },
-        fmtPct(dxy.change)
-      )
-    ),
-    h('div', { className: 'regime-item' },
-      h('div', { className: 'label' }, 'VIX'),
-      h('div', { className: 'value', style: { color: (vix.value || 0) > 20 ? 'var(--sell)' : 'var(--buy)' } },
-        vix.value != null ? vix.value.toFixed(1) : '—'
-      ),
-      h('div', { className: 'change', style: { color: 'var(--text-tertiary)' } },
-        vix.regime ? vix.regime.replace('_', ' ').toUpperCase() : ''
-      )
-    ),
-    h('div', { className: 'regime-item' },
-      h('div', { className: 'label' }, '2Y-10Y SPREAD'),
-      h('div', { className: 'value', style: { color: yields.inverted ? 'var(--sell)' : 'var(--buy)' } },
-        yields.spread_2_10 != null ? yields.spread_2_10.toFixed(3) + '%' : '—'
-      ),
-      h('div', { className: 'change', style: { color: 'var(--text-tertiary)' } },
-        yields.inverted ? 'INVERTED' : 'NORMAL'
-      )
-    )
-  );
-}
-
-/* ── Pair Card ── */
-function PairCard({ pair, data, onClick }) {
-  const unified = data?.unified || {};
-  const score = unified.score;
-  const dir = unified.direction || 'NEUTRAL';
-  const conf = unified.confidence || 'LOW';
-  const signalState = data?.signal_state || {};
-  const isActive = signalState.status === 'ACTIVE';
-
-  const badgeClass = isActive ? 'active' : directionBadge(dir);
-  const fillWidth = score != null ? Math.min(100, Math.abs(score - 50) * 2 + 20) : 0;
-  const fillColor = dir === 'BUY' ? 'var(--buy)' : dir === 'SELL' ? 'var(--sell)' : 'var(--neutral)';
-
-  return h('div', {
-    className: 'pair-card',
-    onClick: () => onClick?.(pair, data)
-  },
-    h('div', { className: 'pair-header' },
-      h('div', null,
-        h('div', { className: 'pair-name' }, data?.pair_name || pair),
-        h('div', { className: 'pair-type' }, data?.type || '')
-      ),
-      h('div', null,
-        isActive
-          ? h('span', { className: 'badge badge active' }, 'ACTIVE')
-          : h('span', { className: cls('badge badge', badgeClass) }, dir)
-      )
-    ),
-    h('div', { className: 'pair-price', style: { color: scoreColor(score) } },
-      fmtPrice(data?.current_price, data?.type)
-    ),
-    h('div', { className: 'pair-change' },
-      h('span', { style: { color: 'var(--text-tertiary)' } }, '24h: '),
-      h('span', {
-        style: { color: (data?.price_change_24h || 0) >= 0 ? 'var(--buy)' : 'var(--sell)' }
-      }, fmtPct(data?.price_change_24h))
-    ),
-    h('div', { className: 'confidence-bar' },
-      h('div', { className: 'fill', style: { width: fillWidth + '%', background: fillColor } })
-    ),
-    h('div', { className: 'pair-meta' },
-      h('div', { className: 'pair-meta-item' },
-        'Score: ', h('strong', { style: { color: scoreColor(score) } }, fmtScore(score))
-      ),
-      h('div', { className: 'pair-meta-item' },
-        'RR: ', h('strong', null, data?.risk_reward_1 ? data.risk_reward_1.toFixed(1) : '—')
-      ),
-      isActive && h('div', { className: 'pair-meta-item' },
-        'Status: ', h('strong', { style: { color: 'var(--accent)' } }, 'ACTIVE')
-      )
-    )
-  );
-}
-
-/* ── Pairs Grid ── */
-function PairsGrid({ overview, onPairClick, title }) {
-  const entries = Object.entries(overview || {});
-
-  if (!entries.length) return NoData({ text: 'No market data available' });
-
-  return h('div', null,
-    h('div', { className: 'section-title' },
-      title || 'Market Overview',
-      h('span', { className: 'count' }, entries.length)
-    ),
-    h('div', { className: 'pairs-grid' },
-      entries.map(([pair, data]) =>
-        h(PairCard, { key: pair, pair, data, onClick: onPairClick })
-      )
-    )
-  );
-}
-
-/* ── Top Setups ── */
-function TopSetups({ setups, onPairClick }) {
-  if (!setups || !setups.length) return null;
-
-  return h('div', { style: { marginTop: 20 } },
-    h('div', { className: 'section-title' },
-      'Top Setups',
-      h('span', { className: 'count' }, setups.length)
-    ),
-    h('div', { className: 'pairs-grid' },
-      setups.map(s =>
-        h(PairCard, {
-          key: s.pair,
-          pair: s.pair,
-          data: {
-            pair_name: s.pair_name,
-            type: s.type,
-            current_price: s.current_price,
-            unified: { score: s.score, direction: s.direction, confidence: s.confidence },
-            risk_reward_1: s.rr1,
-            signal_state: s.signal_state,
-            price_change_24h: 0,
-          },
-          onClick: onPairClick
-        })
-      )
-    )
-  );
-}
-
-/* ── Dashboard View ── */
-function DashboardView({ overview, setups, regime, onPairClick }) {
-  return h('div', { className: 'dashboard-grid' },
-    h(RegimeBar, { regime }),
-    h(PairsGrid, { overview, onPairClick }),
-    h(TopSetups, { setups, onPairClick })
-  );
-}
-
-/* ── Indicator Bias Table ── */
-function IndicatorBiasTable({ indicators }) {
-  if (!indicators || !indicators.length) {
-    return h('div', { className: 'no-data', style: { padding: '12px', fontSize: '0.8rem' } },
-      'No indicator data available'
-    );
-  }
-
-  return h('table', { className: 'indicator-table' },
-    h('thead', null,
-      h('tr', null,
-        h('th', null, 'Indicator'),
-        h('th', null, 'Signal'),
-        h('th', null, 'Value'),
-        h('th', null, 'Bias'),
-        h('th', { style: { textAlign: 'right' } }, 'Weight')
-      )
-    ),
-    h('tbody', null,
-      indicators.map((ind, i) => {
-        const sig = (ind.signal || '').toUpperCase();
-        const badgeCls = sig.includes('BUY') ? 'buy' : sig.includes('SELL') ? 'sell' : 'neutral';
-        return h('tr', { key: i },
-          h('td', { style: { fontWeight: 600 } }, ind.indicator || '—'),
-          h('td', null,
-            h('span', { className: cls('badge', badgeCls), style: { fontSize: '0.65rem' } },
-              ind.signal || '—'
-            )
-          ),
-          h('td', { className: 'value' }, ind.value || '—'),
-          h('td', null, ind.reason || '—'),
-          h('td', { className: 'weight' }, ind.weight || '—')
-        );
-      })
-    )
-  );
-}
-
-/* ── Levels Display ── */
-function LevelsBox({ data }) {
-  return h('div', { className: 'levels-grid' },
-    h('div', { className: 'level-box entry' },
-      h('div', { className: 'level-label' }, 'Entry'),
-      h('div', { className: 'level-value', style: { color: 'var(--accent)' } },
-        fmtPrice(data?.entry_price, data?.type)
-      ),
-      data?.risk_reward_1 ? h('div', { className: 'level-rr' }, `RR 1:${data.risk_reward_1.toFixed(1)}`) : null
-    ),
-    h('div', { className: 'level-box support' },
-      h('div', { className: 'level-label' }, 'Stop Loss'),
-      h('div', { className: 'level-value', style: { color: 'var(--sell)' } },
-        fmtPrice(data?.stop_loss, data?.type)
-      )
-    ),
-    h('div', { className: 'level-box resistance' },
-      h('div', { className: 'level-label' }, 'Take Profit 1'),
-      h('div', { className: 'level-value', style: { color: 'var(--buy)' } },
-        fmtPrice(data?.take_profit_1, data?.type)
-      ),
-      data?.risk_reward_1 ? h('div', { className: 'level-rr' },
-        `TP2: ${fmtPrice(data?.take_profit_2, data?.type) || '—'}  `
-      ) : null
-    )
-  );
-}
-
-/* ── CME Levels Display ── */
-function CmeLevelsDisplay({ cmeLevels, cmeSignal }) {
-  if (!cmeLevels && !cmeSignal) return null;
-
-  const levels = cmeLevels || {};
-  const signal = cmeSignal || {};
-  const gamma = signal.gamma_levels || {};
-
-  return h('div', null,
-    h('div', { className: 'section-title', style: { fontSize: '0.85rem', marginBottom: 8 } }, 'CME Key Levels'),
-    h('div', { className: 'cme-levels' },
-      h('div', { className: 'cme-level-item' },
-        h('div', { className: 'label' }, 'Primary Resistance'),
-        h('div', { className: 'value', style: { color: 'var(--sell)' } },
-          levels.primary_resistance != null ? levels.primary_resistance.toFixed(5) : '—'
-        )
-      ),
-      h('div', { className: 'cme-level-item' },
-        h('div', { className: 'label' }, 'Primary Support'),
-        h('div', { className: 'value', style: { color: 'var(--buy)' } },
-          levels.primary_support != null ? levels.primary_support.toFixed(5) : '—'
-        )
-      ),
-      h('div', { className: 'cme-level-item' },
-        h('div', { className: 'label' }, 'Max Pain'),
-        h('div', { className: 'value', style: { color: 'var(--accent)' } },
-          levels.max_pain != null ? levels.max_pain.toFixed(5) : '—'
-        )
-      ),
-      h('div', { className: 'cme-level-item' },
-        h('div', { className: 'label' }, 'Put/Call Ratio'),
-        h('div', { className: 'value' },
-          signal.put_call_ratio != null ? signal.put_call_ratio.toFixed(3) : '—'
-        )
-      ),
-      h('div', { className: 'cme-level-item' },
-        h('div', { className: 'label' }, 'Gamma Flip High'),
-        h('div', { className: 'value', style: { color: 'var(--sell)' } },
-          gamma.high != null ? gamma.high.toFixed(5) : '—'
-        )
-      ),
-      h('div', { className: 'cme-level-item' },
-        h('div', { className: 'label' }, 'Gamma Flip Low'),
-        h('div', { className: 'value', style: { color: 'var(--buy)' } },
-          gamma.low != null ? gamma.low.toFixed(5) : '—'
-        )
-      )
-    )
-  );
-}
-
-/* ── Component Score Bar ── */
-function ComponentScoreBar({ name, score }) {
-  const dir = score >= 60 ? 'BUY' : score <= 40 ? 'SELL' : 'NEUTRAL';
-  const fill = dir === 'BUY' ? score : dir === 'SELL' ? 100 - score : Math.abs(score - 50) * 2;
-  const color = dir === 'BUY' ? 'var(--buy)' : dir === 'SELL' ? 'var(--sell)' : 'var(--neutral)';
-
-  return h('div', { style: { marginBottom: 6 } },
-    h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: 2 } },
-      h('span', { style: { fontWeight: 600 } }, name),
-      h('span', { style: { fontFamily: 'var(--font-mono)', color } }, `${fmtScore(score)} ${dir}`)
-    ),
-    h('div', { className: 'confidence-bar', style: { height: 4 } },
-      h('div', { className: 'fill', style: { width: Math.min(100, fill * 1.2) + '%', background: color } })
-    )
-  );
-}
-
-/* ── Signal Detail Panel (Modal) ── */
-function SignalDetailPanel({ pair, data, onClose }) {
-  if (!data) return null;
-
-  const unified = data.unified || {};
-  const tech = data.technical_signal || {};
-  const news = data.news_signal || {};
-  const tick = data.tick_signal || {};
-  const cme = data.cme_signal || {};
-  const social = data.social_signal || {};
-  const components = unified.components || {};
-  const signalState = data.signal_state || {};
-  const dir = unified.direction || 'NEUTRAL';
-  const badgeCls = directionBadge(dir);
-
-  return h('div', { className: 'detail-panel-overlay', onClick: (e) => { if (e.target === e.currentTarget) onClose(); } },
-    h('div', { className: 'detail-panel' },
-      h('div', { className: 'detail-panel-header' },
-        h('h2', null,
-          data.pair_name || pair,
-          h('span', { className: cls('badge', badgeCls) }, dir),
-          signalState.status === 'ACTIVE' && h('span', { className: 'badge active' }, 'ACTIVE SIGNAL'),
-          signalState.status && signalState.status !== 'ACTIVE' && signalState.status !== 'NO_SIGNAL' &&
-            h('span', { className: cls('badge', badgeCls === 'buy' ? 'buy' : 'sell') }, signalState.status)
-        ),
-        h('button', { className: 'detail-panel-close', onClick: onClose }, '\u2715')
-      ),
-      h('div', { className: 'detail-panel-body' },
-        /* Signal State */
-        signalState.status && signalState.status !== 'NO_SIGNAL' && h('div', { className: 'signal-state-bar' },
-          h('div', { className: 'signal-state-item' },
-            h('div', { className: 'label' }, 'Status'),
-            h('div', { className: 'value', style: { color: 'var(--accent)' } }, signalState.status)
-          ),
-          h('div', { className: 'signal-state-item' },
-            h('div', { className: 'label' }, 'Created'),
-            h('div', { className: 'value', style: { fontSize: '0.75rem' } }, signalState.created_at || '—')
-          ),
-          signalState.closed_at && h('div', { className: 'signal-state-item' },
-            h('div', { className: 'label' }, 'Closed'),
-            h('div', { className: 'value', style: { fontSize: '0.75rem' } }, signalState.closed_at)
-          ),
-          signalState.pips_result ? h('div', { className: 'signal-state-item' },
-            h('div', { className: 'label' }, 'Pips'),
-            h('div', { className: 'value', style: { color: signalState.pips_result > 0 ? 'var(--buy)' : 'var(--sell)' } },
-              signalState.pips_result > 0 ? '+' : '', signalState.pips_result
-            )
-          ) : null
-        ),
-
-        /* Price & Verdict */
-        h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 } },
-          h('div', null,
-            h('div', { style: { fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)', fontWeight: 600 } }, 'Current Price'),
-            h('div', { style: { fontFamily: 'var(--font-mono)', fontSize: '1.4rem', fontWeight: 700, color: scoreColor(unified.score) } },
-              fmtPrice(data.current_price, data.type)
-            )
-          ),
-          h('div', { style: { textAlign: 'right' } },
-            h('div', { style: { fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)', fontWeight: 600 } }, 'Confidence'),
-            h('div', { style: { fontFamily: 'var(--font-mono)', fontSize: '1.1rem', fontWeight: 700, color: unified.confidence === 'HIGH' ? 'var(--buy)' : unified.confidence === 'MEDIUM' ? '#d97706' : 'var(--text-tertiary)' } },
-              unified.confidence || '—'
-            )
-          )
-        ),
-
-        unified.verdict && h('div', { className: 'verdict-text' }, unified.verdict),
-
-        /* Signal Levels */
-        h(LevelsBox, { data }),
-
-        h('div', { className: 'section-divider' }),
-
-        /* Component Scores */
-        h('div', { className: 'section-title', style: { fontSize: '0.85rem', marginBottom: 8 } }, 'Signal Components'),
-        h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 } },
-          h(ComponentScoreBar, { name: 'Technical', score: components.technical }),
-          h(ComponentScoreBar, { name: 'News', score: components.news }),
-          h(ComponentScoreBar, { name: 'Tick Data', score: components.tick }),
-          h(ComponentScoreBar, { name: 'CME', score: components.cme }),
-          h('div', { style: { gridColumn: '1 / -1' } },
-            h(ComponentScoreBar, { name: 'Social Sentiment', score: components.social })
-          )
-        ),
-
-        h('div', { className: 'section-divider' }),
-
-        /* Indicator Bias */
-        h('div', { className: 'section-title', style: { fontSize: '0.85rem', marginBottom: 8 } },
-          'Indicator Bias',
-          h('span', { className: 'count' }, (tech.indicators || []).length)
-        ),
-        h(IndicatorBiasTable, { indicators: tech.indicators }),
-
-        h('div', { className: 'section-divider' }),
-
-        /* CME Levels */
-        h(CmeLevelsDisplay, { cmeLevels: data.cme_levels, cmeSignal: cme }),
-
-        h('div', { className: 'section-divider' }),
-
-        /* All Signal Sources */
-        h('div', { className: 'signal-detail-grid' },
-          /* Technical */
-          h('div', { className: 'panel' },
-            h('div', { style: { fontWeight: 700, fontSize: '0.85rem', marginBottom: 8 } }, 'Technical Analysis'),
-            h('div', { style: { fontSize: '0.8rem', marginBottom: 4 } },
-              'RSI: ', h('strong', null, tech.rsi != null ? tech.rsi.toFixed(1) : '—'),
-              ' | ATR: ', h('strong', null, tech.atr != null ? tech.atr.toFixed(5) : '—')
-            ),
-            h('div', { style: { fontSize: '0.75rem', color: 'var(--text-tertiary)' } },
-              `Direction: ${tech.direction || 'NEUTRAL'}  |  Score: ${fmtScore(tech.score)}`
-            )
-          ),
-
-          /* News */
-          h('div', { className: 'panel' },
-            h('div', { style: { fontWeight: 700, fontSize: '0.85rem', marginBottom: 8 } }, 'News Events'),
-            h('div', { style: { fontSize: '0.75rem', color: 'var(--text-tertiary)', marginBottom: 6 } },
-              `${news.events_analyzed || 0} events analyzed`
-            ),
-            news.top_events && news.top_events.slice(0, 3).map((ev, i) =>
-              h('div', { key: i, style: { fontSize: '0.75rem', padding: '4px 0', borderTop: '1px solid var(--border-light)' } },
-                h('div', { style: { fontWeight: 600 } }, ev.event),
-                h('div', { style: { color: 'var(--text-muted)' } }, `${ev.datetime || ''} — ${ev.impact || ''}`)
-              )
-            )
-          ),
-
-          /* Tick */
-          h('div', { className: 'panel' },
-            h('div', { style: { fontWeight: 700, fontSize: '0.85rem', marginBottom: 8 } }, 'Tick Data'),
-            h('div', { style: { fontSize: '0.8rem', lineHeight: 1.8 } },
-              h('div', null, 'Momentum: ', h('strong', null, fmtScore(tick.score)),
-                h('span', { className: cls('badge', directionBadge(tick.direction)), style: { marginLeft: 6, fontSize: '0.6rem' } }, tick.direction || '—')
-              ),
-              h('div', null, 'Micro Trend: ', h('strong', null, tick.micro_trend || '—')),
-              h('div', null, 'Liquidity: ', h('strong', null, tick.liquidity_score != null ? tick.liquidity_score + '/10' : '—'))
-            )
-          ),
-
-          /* CME */
-          h('div', { className: 'panel' },
-            h('div', { style: { fontWeight: 700, fontSize: '0.85rem', marginBottom: 8 } }, 'CME Futures & Options'),
-            h('div', { style: { fontSize: '0.8rem', lineHeight: 1.8 } },
-              h('div', null, 'Assessment: ', h('strong', {
-                style: { color: cme.assessment === 'bullish' ? 'var(--buy)' : cme.assessment === 'bearish' ? 'var(--sell)' : 'var(--neutral)' }
-              }, (cme.assessment || 'neutral').toUpperCase())),
-              h('div', null, 'Conviction: ', h('strong', null, (cme.conviction || 'low').toUpperCase())),
-              h('div', null, 'Max Pain: ', h('strong', { style: { fontFamily: 'var(--font-mono)' } },
-                cme.max_pain != null ? cme.max_pain.toFixed(5) : '—'
-              ))
-            )
-          ),
-
-          /* Social */
-          h('div', { className: 'panel full-width' },
-            h('div', { style: { fontWeight: 700, fontSize: '0.85rem', marginBottom: 8 } }, 'Social Sentiment'),
-            h('div', { style: { fontSize: '0.8rem', lineHeight: 1.8, display: 'flex', gap: 24 } },
-              h('div', null, 'Classification: ',
-                h('strong', { style: { color: social.classification === 'bullish' ? 'var(--buy)' : social.classification === 'bearish' ? 'var(--sell)' : 'var(--neutral)' } },
-                  (social.classification || 'neutral').toUpperCase()
-                )
-              ),
-              h('div', null, 'Volume: ', h('strong', null, social.mention_volume || 0)),
-              h('div', null, 'Consensus: ', h('strong', null, (social.consensus || 'mixed').replace('_', ' ').toUpperCase()))
-            )
-          )
-        ),
-
-        /* Support / Resistance */
-        h('div', { className: 'section-divider' }),
-        h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 } },
-          h('div', null,
-            h('div', { className: 'section-title', style: { fontSize: '0.85rem', marginBottom: 6 } }, 'Support Levels'),
-            (data.support_levels || []).map((s, i) =>
-              h('div', { key: i, style: { fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: 'var(--buy)', padding: '2px 0' } },
-                fmtPrice(s, data.type)
-              )
-            )
-          ),
-          h('div', null,
-            h('div', { className: 'section-title', style: { fontSize: '0.85rem', marginBottom: 6 } }, 'Resistance Levels'),
-            (data.resistance_levels || []).map((r, i) =>
-              h('div', { key: i, style: { fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: 'var(--sell)', padding: '2px 0' } },
-                fmtPrice(r, data.type)
-              )
-            )
-          )
-        )
-      )
-    )
-  );
-}
-
-/* ── Signals View ── */
-function SignalsView({ signals, onPairClick }) {
-  const entries = Object.entries(signals || {});
-  const withSignals = entries.filter(([, d]) => {
-    const dir = d?.unified?.direction || 'NEUTRAL';
-    return dir !== 'NEUTRAL';
-  });
-  const neutral = entries.filter(([, d]) => {
-    const dir = d?.unified?.direction || 'NEUTRAL';
-    return dir === 'NEUTRAL';
-  });
-
-  return h('div', null,
-    withSignals.length > 0 && h('div', null,
-      h('div', { className: 'section-title' },
-        'Active Signals',
-        h('span', { className: 'count' }, withSignals.length)
-      ),
-      h('div', { className: 'pairs-grid' },
-        withSignals.map(([pair, data]) =>
-          h(PairCard, { key: pair, pair, data, onClick: onPairClick })
-        )
-      )
-    ),
-
-    neutral.length > 0 && h('div', { style: { marginTop: 20 } },
-      h('div', { className: 'section-title' },
-        'Neutral / No Setup',
-        h('span', { className: 'count' }, neutral.length)
-      ),
-      h('div', { className: 'pairs-grid' },
-        neutral.map(([pair, data]) =>
-          h(PairCard, { key: pair, pair, data, onClick: onPairClick })
-        )
-      )
-    ),
-
-    !entries.length && h(NoData, { text: 'No signal data available' })
-  );
-}
-
-/* ── News Calendar View ── */
-function NewsView({ events }) {
-  if (!events || !events.length) return h(NoData, { text: 'No upcoming news events' });
-
-  const now = new Date();
-
-  return h('div', null,
-    h('div', { className: 'section-title' },
-      'Economic Calendar',
-      h('span', { className: 'count' }, events.length)
-    ),
-    h('div', { className: 'news-list' },
-      h('div', { className: 'news-header' },
-        h('span', null, 'Date'),
-        h('span', null, 'Impact'),
-        h('span', null, 'Event'),
-        h('span', { style: { textAlign: 'right' } }, 'Actual'),
-        h('span', { style: { textAlign: 'right' } }, 'Forecast'),
-        h('span', { style: { textAlign: 'right' } }, 'Prev')
-      ),
-      events.slice(0, 50).map((ev, i) => {
-        const impact = (ev.impact || '').toLowerCase();
-        let impactClass = 'low';
-        if (impact.includes('high') || impact.includes('red')) impactClass = 'high';
-        else if (impact.includes('medium') || impact.includes('orange')) impactClass = 'medium';
-
-        const evTime = ev.datetime ? new Date(ev.datetime) : null;
-        const isSoon = evTime && ((evTime - now) / 1000 / 60 / 60) < 2;
-
-        return h('div', {
-          key: i,
-          className: 'news-event',
-          style: isSoon ? { background: 'var(--accent-light)' } : {}
-        },
-          h('span', { className: 'event-date' }, ev.date || ev.datetime || '—'),
-          h('span', { className: cls('event-impact', impactClass) },
-            impactClass === 'high' ? 'HIGH' : impactClass === 'medium' ? 'MED' : 'LOW'
-          ),
-          h('span', { className: 'event-name' }, ev.event || '—'),
-          h('span', { className: 'event-actual', style: { textAlign: 'right' } }, ev.actual || '—'),
-          h('span', { className: 'event-forecast', style: { textAlign: 'right' } }, ev.forecast || '—'),
-          h('span', { className: 'event-forecast', style: { textAlign: 'right' } }, ev.previous || '—')
-        );
-      })
-    )
-  );
-}
-
-/* ── Cross-Asset Analysis View ── */
-function AnalysisView({ analysis, cmeAll, regime }) {
-  const dxy = analysis?.dxy || {};
-  const vix = analysis?.vix || {};
-  const yields = analysis?.yields || {};
-  const correlations = analysis?.correlations || {};
-
-  return h('div', null,
-    /* Market Regime */
-    h(RegimeBar, { regime }),
-
-    /* Cross Asset Grid */
-    h('div', { className: 'section-title', style: { marginTop: 20 } }, 'Cross-Asset Data'),
-    h('div', { className: 'asset-grid' },
-      h('div', { className: 'asset-card' },
-        h('div', { className: 'asset-name' }, 'US Dollar Index'),
-        h('div', { className: 'asset-value', style: { color: 'var(--accent)' } },
-          dxy.value != null ? dxy.value.toFixed(2) : '—'
-        ),
-        h('div', { className: cls('asset-change', (dxy.change || 0) >= 0 ? 'pos' : 'neg') },
-          fmtPct(dxy.change),
-          ' | ', dxy.strength ? dxy.strength.replace('_', ' ').toUpperCase() : ''
-        )
-      ),
-      h('div', { className: 'asset-card' },
-        h('div', { className: 'asset-name' }, 'VIX'),
-        h('div', { className: 'asset-value', style: { color: (vix.value || 0) > 20 ? 'var(--sell)' : 'var(--buy)' } },
-          vix.value != null ? vix.value.toFixed(1) : '—'
-        ),
-        h('div', { className: 'change', style: { color: 'var(--text-tertiary)', fontSize: '0.85rem', fontFamily: 'var(--font-mono)', marginTop: 2 } },
-          vix.regime ? vix.regime.replace('_', ' ').toUpperCase() : ''
-        )
-      ),
-      h('div', { className: 'asset-card' },
-        h('div', { className: 'asset-name' }, '10Y Yield'),
-        h('div', { className: 'asset-value' },
-          yields['10y_yield'] != null ? yields['10y_yield'].toFixed(2) + '%' : '—'
-        )
-      ),
-      h('div', { className: 'asset-card' },
-        h('div', { className: 'asset-name' }, '2Y Yield'),
-        h('div', { className: 'asset-value' },
-          yields['2y_yield'] != null ? yields['2y_yield'].toFixed(2) + '%' : '—'
-        )
-      ),
-      h('div', { className: 'asset-card' },
-        h('div', { className: 'asset-name' }, '30Y Yield'),
-        h('div', { className: 'asset-value' },
-          yields['30y_yield'] != null ? yields['30y_yield'].toFixed(2) + '%' : '—'
-        )
-      ),
-      h('div', { className: 'asset-card' },
-        h('div', { className: 'asset-name' }, 'Yield Curve'),
-        h('div', { className: 'asset-value', style: { color: yields.inverted ? 'var(--sell)' : 'var(--buy)', fontSize: '1rem' } },
-          yields.inverted ? 'INVERTED' : 'NORMAL'
-        ),
-        h('div', { className: 'change', style: { color: 'var(--text-tertiary)', fontSize: '0.75rem', fontFamily: 'var(--font-mono)', marginTop: 2 } },
-          yields.spread_2_10 != null ? `${yields.spread_2_10.toFixed(3)}%` : ''
-        )
-      )
-    ),
-
-    /* Correlations */
-    h('div', { className: 'section-title', style: { marginTop: 20 } }, 'Pair Correlations'),
-    h('div', { className: 'pairs-grid' },
-      Object.entries(correlations || {}).map(([pair, corr]) =>
-        h('div', { key: pair, className: 'pair-card', style: { cursor: 'default' } },
-          h('div', { className: 'pair-name' }, pair),
-          h('div', { style: { marginTop: 8 } },
-            h('div', { style: { fontSize: '0.8rem' } },
-              'DXY Correlation: ',
-              h('strong', {
-                style: {
-                  fontFamily: 'var(--font-mono)',
-                  color: (corr.dxy_correlation || 0) < -0.3 ? 'var(--sell)' : (corr.dxy_correlation || 0) > 0.3 ? 'var(--buy)' : 'var(--neutral)'
-                }
-              }, (corr.dxy_correlation || 0).toFixed(3))
-            ),
-            h('div', { style: { fontSize: '0.75rem', color: 'var(--text-tertiary)', marginTop: 2 } },
-              `Relationship: ${(corr.relationship || 'neutral').toUpperCase()}  |  Strength: ${(corr.strength || 'none').toUpperCase()}`
-            ),
-            corr.estimated && h('div', { style: { fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2, fontStyle: 'italic' } },
-              '* Estimated'
-            )
-          )
-        )
-      )
-    ),
-
-    /* CME Levels for all pairs */
-    cmeAll && Object.keys(cmeAll).length > 0 && h('div', { style: { marginTop: 20 } },
-      h('div', { className: 'section-title' }, 'CME Futures Overview'),
-      h('div', { className: 'pairs-grid' },
-        Object.entries(cmeAll).map(([pair, cmeData]) =>
-          h('div', { key: pair, className: 'pair-card', style: { cursor: 'default' } },
-            h('div', { className: 'pair-name' }, pair),
-            h('div', { style: { display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap' } },
-              h('div', { style: { fontSize: '0.75rem' } },
-                'Assessment: ',
-                h('strong', {
-                  style: { color: cmeData.assessment === 'bullish' ? 'var(--buy)' : cmeData.assessment === 'bearish' ? 'var(--sell)' : 'var(--neutral)' }
-                }, (cmeData.assessment || 'neutral').toUpperCase())
-              ),
-              h('div', { style: { fontSize: '0.75rem' } },
-                'Positioning: ',
-                h('strong', null, (cmeData.futures?.positioning || '—').replace('_', ' ').toUpperCase())
-              ),
-              h('div', { style: { fontSize: '0.75rem' } },
-                'Max Pain: ',
-                h('strong', { style: { fontFamily: 'var(--font-mono)', fontSize: '0.7rem' } },
-                  cmeData.options?.max_pain != null ? cmeData.options.max_pain.toFixed(5) : '—'
-                )
-              )
-            )
-          )
-        )
-      )
-    )
-  );
-}
-
-/* ── Main App ── */
-function App() {
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [theme, setTheme] = useState('dark');
-  const [status, setStatus] = useState('loading');
-  const [overview, setOverview] = useState(null);
-  const [signals, setSignals] = useState(null);
-  const [setups, setSetups] = useState(null);
-  const [news, setNews] = useState(null);
-  const [analysis, setAnalysis] = useState(null);
-  const [regime, setRegime] = useState(null);
-  const [cmeAll, setCmeAll] = useState(null);
-  const [error, setError] = useState(null);
-  const [detailPair, setDetailPair] = useState(null);
-  const [detailData, setDetailData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const intervalRef = useRef(null);
-
-  /* Load all data */
-  const loadAll = useCallback(async () => {
-    try {
-      const [ov, sigs, setupsData, newsData, crossAsset, marketRegime, cme] = await Promise.all([
-        fetchJSON('/market/overview').catch(() => ({})),
-        fetchJSON('/signals/unified').catch(() => ({})),
-        fetchJSON('/signals/setups?min_score=55').catch(() => []),
-        fetchJSON('/news/upcoming?hours=72').catch(() => []),
-        fetchJSON('/analysis/cross-asset').catch(() => ({})),
-        fetchJSON('/analysis/regime').catch(() => ({})),
-        fetchJSON('/cme').catch(() => ({})),
-      ]);
-
-      setOverview(ov);
-      setSignals(sigs);
-      setSetups(setupsData);
-      setNews(newsData);
-      setAnalysis(crossAsset);
-      setRegime(marketRegime);
-      setCmeAll(cme);
-      setStatus('ok');
-      setError(null);
-    } catch (err) {
-      setError(err.message);
-      setStatus('error');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  /* Load detail data for a pair */
-  const loadDetail = useCallback(async (pair) => {
-    try {
-      const data = await fetchJSON(`/signals/unified/${pair}`);
-      return data;
-    } catch (err) {
-      return null;
-    }
-  }, []);
-
-  /* Open detail panel */
-  const openDetail = useCallback(async (pair, data) => {
-    if (!data) {
-      const d = await loadDetail(pair);
-      setDetailPair(pair);
-      setDetailData(d);
-    } else {
-      setDetailPair(pair);
-      setDetailData(data);
-    }
-  }, [loadDetail]);
-
-  const closeDetail = useCallback(() => {
-    setDetailPair(null);
-    setDetailData(null);
-  }, []);
-
-  /* Auto-refresh */
-  useEffect(() => {
-    loadAll();
-    intervalRef.current = setInterval(loadAll, 30000);
-    return () => clearInterval(intervalRef.current);
-  }, [loadAll]);
-
-  /* Theme */
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-  }, [theme]);
-
-  const toggleTheme = useCallback(() => {
-    setTheme(t => t === 'dark' ? 'light' : 'dark');
-  }, []);
-
-  /* Loading state */
-  if (loading) {
-    return h('div', { className: 'app' },
-      h(Nav, { activeTab, onTabChange: setActiveTab, theme, onThemeToggle: toggleTheme, status }),
-      h('div', { className: 'main-content' },
-        h(Loading, { text: 'Loading market data...' })
-      )
-    );
-  }
-
-  return h('div', { className: 'app' },
-    h(Nav, { activeTab, onTabChange: setActiveTab, theme, onThemeToggle: toggleTheme, status }),
-
-    h('div', { className: 'main-content' },
-      h(ErrorMsg, { message: error }),
-
-      activeTab === 'dashboard' && h(DashboardView, {
-        overview,
-        setups,
-        regime,
-        onPairClick: openDetail
-      }),
-
-      activeTab === 'signals' && h(SignalsView, {
-        signals,
-        onPairClick: openDetail
-      }),
-
-      activeTab === 'news' && h(NewsView, { events: news }),
-
-      activeTab === 'analysis' && h(AnalysisView, {
-        analysis,
-        cmeAll,
-        regime
-      })
-    ),
-
-    /* Detail Panel */
-    detailPair && h(SignalDetailPanel, {
-      pair: detailPair,
-      data: detailData,
-      onClose: closeDetail
+function ScoreBar({ score, direction }) {
+  const dir = (direction || '').toLowerCase();
+  const cls = dir === 'buy' ? 'bullish' : dir === 'sell' ? 'bearish' : 'neutral';
+  return h('div', { className: 'score-bar' },
+    h('div', {
+      className: `score-bar-fill ${cls}`,
+      style: { width: `${score || 50}%` },
     })
   );
 }
 
-/* ── Mount ── */
+function Badge({ text, variant = 'neutral' }) {
+  return h('span', { className: `card-badge badge-${variant}` }, text || variant.toUpperCase());
+}
+
+function FormatPrice({ value, decimals = 5 }) {
+  if (!value && value !== 0) return '—';
+  return value.toFixed(decimals);
+}
+
+/* ── Price Card ──────────────────────────────────────────────────── */
+
+function PriceCard({ pair, data }) {
+  if (!data) return null;
+
+  const dir = (data.direction || '').toLowerCase();
+  const change = data.change || 0;
+  const changeCls = change >= 0 ? 'positive' : 'negative';
+  const cardCls = `price-card ${dir || 'neutral'}`;
+  const hasSignal = data.setup_valid || data.active_signal;
+
+  return h('div', { className: cardCls },
+    h('div', { className: 'price-top' },
+      h('span', { className: 'price-pair' }, data.name || pair),
+      h('span', { className: 'price-type' }, data.type || '—'),
+    ),
+    h('div', { className: 'price-value' },
+      h(FormatPrice, { value: data.price, decimals: pair.includes('USD') && data.type === 'forex' ? 5 : 2 })
+    ),
+    h('div', { className: `price-change ${changeCls}` },
+      `${change >= 0 ? '+' : ''}${(change || 0).toFixed(3)}%`
+    ),
+    h('div', { className: 'price-source' },
+      `Source: ${data.source || 'N/A'}`
+    ),
+    hasSignal
+      ? h('div', {
+          className: `price-signal badge-${dir || 'neutral'}`,
+          style: { marginTop: '6px' },
+        },
+          data.active_signal ? '🔵 ACTIVE SIGNAL' : `🎯 Score: ${data.score || '—'}`
+        )
+      : null,
+    !data.setup_valid && !data.active_signal
+      ? h('div', { className: 'price-signal', style: { color: 'var(--text-muted)', fontSize: '0.7rem', marginTop: '6px' } },
+          'No setup'
+        )
+      : null,
+  );
+}
+
+/* ── Price Overview Bar ───────────────────────────────────────────── */
+
+function PriceTicker({ data }) {
+  if (!data) return h(Loading);
+  const pairs = Object.entries(data);
+  return h('div', { className: 'fade-in' },
+    h('div', { className: 'price-grid' },
+      ...pairs.map(([key, val]) => h(PriceCard, { key, pair: key, data: val }))
+    )
+  );
+}
+
+/* ── Signal Card ──────────────────────────────────────────────────── */
+
+function SignalCard({ pair, data }) {
+  if (!data) return null;
+
+  const dir = (data.unified?.direction || data.technical_direction || 'NEUTRAL').toLowerCase();
+  const score = data.unified?.score || data.technical_score || 50;
+  const conf = (data.unified?.confidence || 'LOW').toLowerCase();
+  const info = data.pair_name || pair;
+
+  return h('div', { className: 'signal-card fade-in' },
+    h('div', { className: 'signal-card-header' },
+      h('div', { className: 'signal-pair-info' },
+        h('span', { className: 'signal-pair-name' }, info),
+        h('span', { className: 'signal-pair-type' }, data.type || '—'),
+      ),
+      h('div', {
+        className: `signal-direction ${dir}`,
+        style: dir === 'neutral' ? { background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)' } : {}
+      },
+        dir.toUpperCase(),
+        !data.setup_valid ? ' (NO SETUP)' : ''
+      ),
+    ),
+
+    data.setup_valid && (data.entry || data.sl)
+      ? h('div', { className: 'signal-levels' },
+          h('div', { className: 'signal-level' },
+            h('div', { className: 'signal-level-label' }, 'Entry'),
+            h('div', { className: 'signal-level-value' },
+              h(FormatPrice, { value: data.entry, decimals: data.type === 'forex' ? 5 : 2 })
+            ),
+          ),
+          h('div', { className: 'signal-level' },
+            h('div', { className: 'signal-level-label' }, 'Stop Loss'),
+            h('div', { className: 'signal-level-value', style: { color: 'var(--accent-red)' } },
+              h(FormatPrice, { value: data.sl, decimals: data.type === 'forex' ? 5 : 2 })
+            ),
+          ),
+          h('div', { className: 'signal-level' },
+            h('div', { className: 'signal-level-label' }, `TP1 (R:${data.rr1 || '?'})`),
+            h('div', { className: 'signal-level-value', style: { color: 'var(--accent-green)' } },
+              h(FormatPrice, { value: data.tp1, decimals: data.type === 'forex' ? 5 : 2 })
+            ),
+          ),
+        )
+      : null,
+
+    h(ScoreBar, { score, direction: dir }),
+
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '8px' } },
+      h('span', {}, `Confidence: ${conf.toUpperCase()}`),
+      h('span', {}, `Price: $${(data.current_price || 0).toFixed(data.type === 'forex' ? 5 : 2)}`),
+    ),
+
+    data.technical_details && data.technical_details.length > 0
+      ? h('details', { style: { marginTop: '12px' } },
+          h('summary', { style: { cursor: 'pointer', fontSize: '0.75rem', color: 'var(--text-secondary)' } },
+            `Indicators (${data.technical_details.length})`
+          ),
+          h('table', { className: 'indicator-table', style: { marginTop: '8px' } },
+            h('thead', {},
+              h('tr', {},
+                h('th', {}, 'Indicator'),
+                h('th', {}, 'Signal'),
+                h('th', {}, 'Value'),
+                h('th', {}, 'Weight'),
+              ),
+            ),
+            h('tbody', {},
+              ...data.technical_details.map((d, i) =>
+                h('tr', { key: i },
+                  h('td', { style: { fontSize: '0.7rem' } }, d.indicator || '—'),
+                  h('td', { className: `indicator-cell ${(d.signal || '').toLowerCase().includes('buy') ? 'buy' : (d.signal || '').toLowerCase().includes('sell') ? 'sell' : 'neutral'}` },
+                    d.signal || '—'
+                  ),
+                  h('td', { style: { fontFamily: 'JetBrains Mono, monospace', fontSize: '0.7rem' } }, d.value || '—'),
+                  h('td', { style: { fontSize: '0.7rem', color: 'var(--text-muted)' } }, d.weight || '—'),
+                )
+              ),
+            ),
+          ),
+        )
+      : null,
+  );
+}
+
+/* ── Active Signal Panel ─────────────────────────────────────────── */
+
+function ActiveSignalPanel({ signals }) {
+  if (!signals || Object.keys(signals).length === 0) {
+    return h('div', { className: 'card fade-in' },
+      h('div', { className: 'card-header' },
+        h('span', { className: 'card-title' }, 'Active Signals'),
+      ),
+      h('p', { style: { color: 'var(--text-muted)', textAlign: 'center', padding: '20px' } },
+        'No active trading signals. New signals are generated automatically when conditions align.'
+      ),
+    );
+  }
+
+  return h('div', { className: 'fade-in' },
+    h('div', { className: 'card-header', style: { marginBottom: '12px' } },
+      h('span', { className: 'card-title' }, 'Active Signals'),
+      h(Badge, { text: `${Object.keys(signals).length} Active`, variant: 'high' }),
+    ),
+    h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
+      ...Object.entries(signals).map(([pair, signal]) =>
+        h('div', { key: pair, className: 'active-signal-card fade-in' },
+          h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' } },
+            h('span', { style: { fontWeight: 700, fontSize: '1.1rem' } },
+              signal.pair_name || pair
+            ),
+            h('span', {
+              className: `badge-${(signal.direction || '').toLowerCase()}`,
+              style: { padding: '4px 12px', borderRadius: '100px', fontSize: '0.75rem', fontWeight: 700 }
+            },
+              (signal.direction || 'NEUTRAL').toUpperCase()
+            ),
+          ),
+          h('div', { className: 'active-signal-grid' },
+            h('div', { className: 'active-level' },
+              h('div', { className: 'active-level-label' }, 'Entry'),
+              h('div', { className: 'active-level-value' }, signal.entry || '—'),
+            ),
+            h('div', { className: 'active-level' },
+              h('div', { className: 'active-level-label' }, 'Stop Loss'),
+              h('div', { className: 'active-level-value', style: { color: 'var(--accent-red)' } }, signal.sl || '—'),
+            ),
+            h('div', { className: 'active-level' },
+              h('div', { className: 'active-level-label' }, `TP (R:${signal.rr1 || '?'})`),
+              h('div', { className: 'active-level-value', style: { color: 'var(--accent-green)' } }, signal.tp1 || '—'),
+            ),
+          ),
+          h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: 'var(--text-muted)' } },
+            h('span', {}, `Score: ${signal.score || '—'}  |  Confidence: ${(signal.confidence || '').toUpperCase()}`),
+            h('button', {
+              className: 'btn btn-danger btn-sm',
+              onClick: async () => {
+                try {
+                  await API.post(`/api/signals/close/${pair}`);
+                  window.location.reload();
+                } catch (e) { alert(e.message); }
+              },
+            }, h('i', { className: 'fas fa-times' }), ' Close'),
+          ),
+        )
+      ),
+    ),
+  );
+}
+
+/* ── Analysis Panel ────────────────────────────────────────────────── */
+
+function AnalysisPanel() {
+  const { data: analysis, loading: al, error: ae } = useAnalysisData();
+  const { data: regime, loading: rl, error: re } = useRegimeData();
+
+  if (al || rl) return h(Loading);
+  if (ae || re) return h(ErrorMsg, { message: ae || re });
+
+  return h('div', { className: 'fade-in' },
+    // Market Regime
+    regime
+      ? h('div', { className: 'card', style: { marginBottom: '16px' } },
+          h('div', { className: 'card-header' },
+            h('span', { className: 'card-title' }, 'Market Regime'),
+          ),
+          h('div', {
+            className: `regime-badge ${(regime.regime || '').toLowerCase()}`,
+          },
+            regime.regime === 'RISK_ON' ? '🚀 ' : regime.regime === 'RISK_OFF' ? '🛡️ ' : '⚖️ ',
+            regime.description || '—'
+          ),
+        )
+      : null,
+
+    // Cross-Asset Analysis
+    analysis
+      ? h('div', { className: 'analysis-grid' },
+          // DXY
+          h('div', { className: 'card' },
+            h('div', { className: 'card-header' },
+              h('span', { className: 'card-title' }, '🇺🇸 US Dollar Index'),
+            ),
+            h('div', { className: 'analysis-item' },
+              h('span', { className: 'analysis-label' }, 'Value'),
+              h('span', { className: 'analysis-value' }, (analysis.dxy?.value || 0).toFixed(2)),
+            ),
+            h('div', { className: 'analysis-item' },
+              h('span', { className: 'analysis-label' }, 'Change'),
+              h('span', { className: `analysis-value ${analysis.dxy?.trend === 'bullish' ? 'bullish' : 'bearish'}` },
+                `${analysis.dxy?.change >= 0 ? '+' : ''}${(analysis.dxy?.change || 0).toFixed(2)}%`
+              ),
+            ),
+            h('div', { className: 'analysis-item' },
+              h('span', { className: 'analysis-label' }, 'Implication'),
+              h('span', { style: { fontSize: '0.75rem', textAlign: 'right', maxWidth: '60%', color: 'var(--text-secondary)' } },
+                analysis.dxy?.implication || '—'
+              ),
+            ),
+          ),
+
+          // VIX
+          h('div', { className: 'card' },
+            h('div', { className: 'card-header' },
+              h('span', { className: 'card-title' }, '🌊 VIX — Volatility'),
+            ),
+            h('div', { className: 'analysis-item' },
+              h('span', { className: 'analysis-label' }, 'Value'),
+              h('span', { className: 'analysis-value' }, (analysis.vix?.value || 0).toFixed(2)),
+            ),
+            h('div', { className: 'analysis-item' },
+              h('span', { className: 'analysis-label' }, 'Regime'),
+              h('span', { className: 'analysis-value' }, (analysis.vix?.regime || '—').toUpperCase()),
+            ),
+            h('div', { className: 'analysis-item' },
+              h('span', { className: 'analysis-label' }, 'Implication'),
+              h('span', { style: { fontSize: '0.75rem', textAlign: 'right', maxWidth: '60%', color: 'var(--text-secondary)' } },
+                analysis.vix?.implication || '—'
+              ),
+            ),
+          ),
+
+          // Yields
+          h('div', { className: 'card', style: { gridColumn: '1 / -1' } },
+            h('div', { className: 'card-header' },
+              h('span', { className: 'card-title' }, '🏦 US Treasury Yields'),
+            ),
+            h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '12px' } },
+              ['US5Y', 'US10Y', 'US30Y'].map(key => {
+                const y = analysis.yields?.[key] || {};
+                return h('div', { key, className: 'signal-level' },
+                  h('div', { className: 'signal-level-label' }, key.replace('US', '') + 'Y'),
+                  h('div', { className: 'signal-level-value' },
+                    `${(y.value || 0).toFixed(2)}%`
+                  ),
+                  h('div', { style: { fontSize: '0.65rem', color: y.trend === 'bullish' ? 'var(--accent-green)' : 'var(--accent-red)' } },
+                    `${y.change >= 0 ? '+' : ''}${(y.change || 0).toFixed(2)}%`
+                  ),
+                );
+              }),
+            ),
+            h('div', { style: { fontSize: '0.75rem', color: 'var(--text-secondary)', textAlign: 'center' } },
+              `Curve: ${(analysis.yields?.curve || '—').toUpperCase()} — ${analysis.yields?.implication || '—'}`
+            ),
+          ),
+        )
+      : h(ErrorMsg, { message: 'No analysis data' }),
+  );
+}
+
+/* ── Top Setups Panel ────────────────────────────────────────────────── */
+
+function TopSetupsPanel() {
+  const { data: setups, loading, error } = useSetupsData();
+
+  if (loading) return null;
+  if (error) return null;
+  if (!setups || Object.keys(setups).length === 0) return null;
+
+  return h('div', { className: 'card fade-in', style: { marginBottom: '20px' } },
+    h('div', { className: 'card-header' },
+      h('span', { className: 'card-title' }, '🏆 Top Trading Setups'),
+      h(Badge, { text: `${Object.keys(setups).length} Available`, variant: 'high' }),
+    ),
+    h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
+      ...Object.entries(setups).map(([pair, data]) => {
+        const dir = (data.unified?.direction || '').toLowerCase();
+        return h('div', { key: pair, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)' } },
+          h('div', {},
+            h('div', { style: { fontWeight: 600, fontSize: '0.9rem' } }, data.pair_name || pair),
+            h('div', { style: { fontSize: '0.7rem', color: 'var(--text-muted)' } },
+              `Score: ${data.unified?.score || '—'}  •  R:R ${data.rr1 || '?'}:1`
+            ),
+          ),
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+            h(Badge, { text: data.unified?.direction || '—', variant: dir === 'buy' ? 'high' : dir === 'sell' ? 'low' : 'neutral' }),
+            h('span', { className: 'mono', style: { color: 'var(--text-muted)', fontSize: '0.8rem' } },
+              data.unified?.confidence || '—'
+            ),
+          ),
+        );
+      }),
+    ),
+  );
+}
+
+/* ── Signals View ──────────────────────────────────────────────────── */
+
+function SignalsView() {
+  const { data: signals, loading, error } = useSignalsData();
+  const { data: active } = useActiveSignals();
+
+  return h('div', { className: 'fade-in' },
+    // Active signals panel
+    h(ActiveSignalPanel, { signals: active }),
+
+    // Top setups
+    h(TopSetupsPanel),
+
+    // All signals grid
+    signals
+      ? h('div', { style: { marginTop: '20px' } },
+          h('div', { className: 'card-header', style: { marginBottom: '12px' } },
+            h('span', { className: 'card-title' }, 'All Pairs — Unified Signals'),
+          ),
+          h('div', { className: 'signal-grid' },
+            ...Object.entries(signals).map(([pair, data]) =>
+              h(SignalCard, { key: pair, pair, data })
+            )
+          ),
+        )
+      : loading ? h(Loading) : h(ErrorMsg, { message: error }),
+  );
+}
+
+/* ── Dashboard View ────────────────────────────────────────────────── */
+
+function DashboardView() {
+  const { data: prices, loading, error } = usePriceData();
+  const { data: active } = useActiveSignals();
+  const { data: regime } = useRegimeData();
+
+  if (loading) return h(Loading);
+  if (error) return h(ErrorMsg, { message: error });
+
+  return h('div', { className: 'fade-in' },
+    // Price ticker
+    h('div', { style: { marginBottom: '8px' } },
+      h('span', { className: 'card-title', style: { fontSize: '0.75rem' } }, 'Market Overview'),
+    ),
+    h(PriceTicker, { data: prices }),
+
+    // Active signal
+    active && Object.keys(active).length > 0
+      ? h(ActiveSignalPanel, { signals: active })
+      : null,
+
+    // Market regime summary
+    regime
+      ? h('div', { style: { display: 'flex', gap: '12px', marginTop: '16px', flexWrap: 'wrap' } },
+          h('div', { className: 'card', style: { flex: 1, minWidth: '200px' } },
+            h('div', { className: 'card-header' },
+              h('span', { className: 'card-title' }, 'Market Regime'),
+            ),
+            h('div', {
+              className: `regime-badge ${(regime.regime || '').toLowerCase()}`,
+              style: { margin: 0 },
+            },
+              regime.regime === 'RISK_ON' ? '🚀 ' : regime.regime === 'RISK_OFF' ? '🛡️ ' : '⚖️ ',
+              regime.description
+            ),
+          ),
+          h('div', { className: 'card', style: { flex: 1, minWidth: '200px' } },
+            h('div', { className: 'card-header' },
+              h('span', { className: 'card-title' }, 'Cross-Asset'),
+            ),
+            h('div', { style: { display: 'flex', gap: '16px', flexWrap: 'wrap' } },
+              h('span', { style: { fontSize: '0.85rem' } }, `VIX: ${((regime.vix || 0)).toFixed(1)}`),
+              h('span', { style: { fontSize: '0.85rem' } }, `10Y: ${((regime.us10y || 0)).toFixed(2)}%`),
+              h('span', { style: { fontSize: '0.85rem', color: regime.dxy_trend === 'bearish' ? 'var(--accent-green)' : 'var(--accent-red)' } },
+                `DXY: ${(regime.dxy_trend || '').toUpperCase()}`
+              ),
+            ),
+          ),
+        )
+      : null,
+
+    // Top setups
+    h(TopSetupsPanel),
+  );
+}
+
+/* ── Analysis View ──────────────────────────────────────────────────── */
+
+function AnalysisView() {
+  return h('div', { className: 'fade-in' },
+    h('div', { className: 'card-header', style: { marginBottom: '16px' } },
+      h('span', { className: 'card-title' }, 'Cross-Asset Analysis'),
+    ),
+    h(AnalysisPanel),
+  );
+}
+
+/* ── App Root ────────────────────────────────────────────────────────── */
+
+function App() {
+  const [view, setView] = useState('dashboard');
+
+  const navItems = [
+    { id: 'dashboard', icon: 'fas fa-chart-line', label: 'Dashboard' },
+    { id: 'signals', icon: 'fas fa-bolt', label: 'Signals' },
+    { id: 'analysis', icon: 'fas fa-globe', label: 'Analysis' },
+  ];
+
+  return h('div', { className: 'app-container' },
+    // Header
+    h('header', { className: 'header' },
+      h('div', { className: 'header-brand' },
+        h('span', { className: 'icon' }, '📈'),
+        h('span', {}, 'Trader'),
+        h('span', { style: { fontSize: '0.65rem', color: 'var(--text-muted)', fontWeight: 400 } }, 'v2'),
+      ),
+      h('nav', { className: 'header-nav' },
+        ...navItems.map(item =>
+          h('button', {
+            key: item.id,
+            className: view === item.id ? 'active' : '',
+            onClick: () => setView(item.id),
+          },
+            h('i', { className: item.icon }),
+            h('span', { className: 'mobile-hide' }, ' ', item.label),
+          )
+        ),
+      ),
+      h('div', { className: 'header-status' },
+        h('span', { className: 'status-dot live' }),
+        h('span', { style: { fontSize: '0.75rem', color: 'var(--text-secondary)' } }, 'LIVE'),
+      ),
+    ),
+
+    // Main Content
+    h('main', { className: 'main-content' },
+      view === 'dashboard' ? h(DashboardView) :
+      view === 'signals' ? h(SignalsView) :
+      view === 'analysis' ? h(AnalysisView) :
+      h(DashboardView),
+    ),
+  );
+}
+
+/* ── Mount ────────────────────────────────────────────────────────────── */
+
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(h(App));
