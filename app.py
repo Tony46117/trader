@@ -33,6 +33,9 @@ from services.signals import (
 )
 from services.analysis import get_cross_asset_analysis, get_market_regime
 from providers.news import get_upcoming_events, get_all_news_signals, get_news_signal_for_pair
+from providers.tick import get_tick_signal, get_all_tick_signals
+from providers.cme import get_cme_signal, get_all_cme_signals
+from providers.social import get_social_signal, get_all_social_signals
 from models.state import signal_state_manager
 
 app = Flask(__name__, static_url_path="/static", static_folder="static")
@@ -211,6 +214,59 @@ def api_signal_history(pair=None):
         pair = pair.upper()
     limit = request.args.get("limit", 10, type=int)
     return jsonify({"status": "ok", "data": signal_state_manager.get_history(pair, limit)})
+
+
+# ── Tick / CME / Social API ────────────────────────────────────────
+
+@app.route("/api/tick")
+@cached(ttl=30)
+def api_tick_all():
+    prices = get_current_prices()
+    return jsonify({"status": "ok", "data": get_all_tick_signals(prices)})
+
+
+@app.route("/api/tick/<pair>")
+@cached(ttl=30)
+def api_tick_pair(pair):
+    pair = pair.upper()
+    if pair not in PAIRS:
+        return jsonify({"status": "error", "message": f"Invalid pair: {pair}"}), 404
+    prices = get_current_prices()
+    price = prices.get(pair, {}).get("bid", 1.0)
+    return jsonify({"status": "ok", "data": get_tick_signal(pair, price)})
+
+
+@app.route("/api/cme")
+@cached(ttl=60)
+def api_cme_all():
+    prices = get_current_prices()
+    return jsonify({"status": "ok", "data": get_all_cme_signals(prices)})
+
+
+@app.route("/api/cme/<pair>")
+@cached(ttl=60)
+def api_cme_pair(pair):
+    pair = pair.upper()
+    if pair not in PAIRS:
+        return jsonify({"status": "error", "message": f"Invalid pair: {pair}"}), 404
+    prices = get_current_prices()
+    price = prices.get(pair, {}).get("bid", 1.0)
+    return jsonify({"status": "ok", "data": get_cme_signal(pair, price)})
+
+
+@app.route("/api/social")
+@cached(ttl=120)
+def api_social_all():
+    return jsonify({"status": "ok", "data": get_all_social_signals()})
+
+
+@app.route("/api/social/<pair>")
+@cached(ttl=120)
+def api_social_pair(pair):
+    pair = pair.upper()
+    if pair not in PAIRS:
+        return jsonify({"status": "error", "message": f"Invalid pair: {pair}"}), 404
+    return jsonify({"status": "ok", "data": get_social_signal(pair)})
 
 
 # ── News API ────────────────────────────────────────────────────────

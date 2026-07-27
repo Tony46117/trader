@@ -227,10 +227,28 @@ function SignalCard({ pair, data }) {
 
     h(ScoreBar, { score, direction: dir }),
 
+    // Source component scores
+    const comp = data.unified?.components || {};
+    const compKeys = Object.keys(comp).filter(k => comp[k] !== undefined && comp[k] !== null);
+    
     h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '8px' } },
       h('span', {}, `Confidence: ${conf.toUpperCase()}`),
       h('span', {}, `Price: $${(data.current_price || 0).toFixed(data.type === 'forex' ? 5 : 2)}`),
     ),
+
+    compKeys.length > 0
+      ? h('div', { style: { display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '8px' } },
+          ...compKeys.map(k => {
+            const val = comp[k];
+            const color = val >= 65 ? 'var(--accent-green)' : val <= 35 ? 'var(--accent-red)' : 'var(--text-muted)';
+            return h('span', {
+              key: k,
+              style: { fontSize: '0.6rem', padding: '2px 6px', borderRadius: '4px', background: 'var(--bg-secondary)', color },
+            title: `${k}: ${val}`,
+          }, `${k === 'technical' ? '📊' : k === 'news' ? '📰' : k === 'tick' ? '⚡' : k === 'cme' ? '💎' : k === 'social' ? '💬' : k.slice(0,3)} ${val}`);
+          })
+        )
+      : null,
 
     data.technical_details && data.technical_details.length > 0
       ? h('details', { style: { marginTop: '12px' } },

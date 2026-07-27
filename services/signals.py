@@ -21,6 +21,9 @@ from services.indicators import (
     compute_pivot_points, compute_support_resistance,
 )
 from providers.news import get_news_signal_for_pair
+from providers.tick import get_tick_signal
+from providers.cme import get_cme_signal
+from providers.social import get_social_signal
 from models.state import signal_state_manager
 
 
@@ -336,49 +339,69 @@ def generate_unified_signal(pair_key):
     if tech is None:
         return None
 
-    # Fetch news signal for full 5-source fusion
+    # Fetch all signal sources for full 5-source fusion
     news_sig = get_news_signal_for_pair(pair_key)
-    news_score = news_sig.get("score", 50)
-    news_dir = news_sig.get("direction", "NEUTRAL")
+    tick_sig = get_tick_signal(pair_key, tech.get("current_price", 0))
+    cme_sig = get_cme_signal(pair_key, tech.get("current_price", 0))
+    social_sig = get_social_signal(pair_key)
 
     tech_score = tech.get("technical_score", 50)
     tech_dir = tech.get("technical_direction", "NEUTRAL")
+    news_score = news_sig.get("score", 50)
+    news_dir = news_sig.get("direction", "NEUTRAL")
+    tick_score = tick_sig.get("score", 50)
+    tick_dir = tick_sig.get("direction", "NEUTRAL")
+    cme_score = cme_sig.get("score", 50)
+    cme_dir = cme_sig.get("direction", "NEUTRAL")
+    social_score = social_sig.get("score", 50)
+    social_dir = social_sig.get("direction", "NEUTRAL")
 
-    # Fusion: weighted average of technical + news
-    tech_weight = 0.60
-    news_weight = 0.40
-    fused_score = (tech_score * tech_weight) + (news_score * news_weight)
+    # Weighted fusion: Technical 40, News 20, Tick 15, CME 15, Social 10
+    fused_score = (
+        tech_score * 0.40 +
+        news_score * 0.20 +
+        tick_score * 0.15 +
+        cme_score * 0.15 +
+        social_score * 0.10
+    )
 
-    # Determine agreement
-    if (tech_dir == "BUY" and news_dir == "BUY") or (tech_dir == "SELL" and news_dir == "SELL"):
+    # Agreement: count how many sources agree with the fused direction
+    fused_dir = "BUY" if fused_score >= 60 else "SELL" if fused_score <= 40 else "NEUTRAL"
+    directions = [tech_dir, news_dir, tick_dir, cme_dir, social_dir]
+    agreeing = sum(1 for d in directions if d == fused_dir)
+
+    if agreeing >= 4:
+        agreement = "STRONG"
+    elif agreeing >= 3:
         agreement = "ALIGNED"
-    elif tech_dir == "NEUTRAL" or news_dir == "NEUTRAL":
+    elif agreeing >= 2:
         agreement = "PARTIAL"
     else:
         agreement = "CONFLICTING"
 
-    # Direction from fused score
-    fused_dir = "BUY" if fused_score >= 60 else "SELL" if fused_score <= 40 else "NEUTRAL"
-
     # Confidence
-    if fused_score >= 75 and agreement == "ALIGNED":
-        confidence = "HIGH"
-    elif fused_score >= 60 or agreement == "ALIGNED":
-        confidence = "MEDIUM"
-    else:
-        confidence = "LOW"
+    score_strength = abs(fused_score - 50) * 2
+    agreement_bonus = {"STRONG": 20, "ALIGNED": 10, "PARTIAL": 0, "CONFLICTING": -10}.get(agreement, 0)
+    total_conf = score_strength + agreement_bonus
+    confidence = "HIGH" if total_conf >= 70 else "MEDIUM" if total_conf >= 40 else "LOW"
 
     unified = {
         **tech,
         "news_signal": news_sig,
+        "tick_signal": tick_sig,
+        "cme_signal": cme_sig,
+        "social_signal": social_sig,
         "unified": {
             "score": round(fused_score, 0),
             "direction": fused_dir,
             "confidence": confidence,
             "agreement": agreement,
             "components": {
-                "technical": tech_score,
-                "news": news_score,
+                "technical": round(tech_score, 0),
+                "news": round(news_score, 0),
+                "tick": round(tick_score, 0),
+                "cme": round(cme_score, 0),
+                "social": round(social_score, 0),
             },
         },
     }
