@@ -648,7 +648,23 @@ def main():
     # Clean stale signal state
     signal_state_manager.reset()
 
-    server = ThreadedHTTPServer(("0.0.0.0", port), TraderHandler)
+    try:
+        server = ThreadedHTTPServer(("0.0.0.0", port), TraderHandler)
+    except OSError as e:
+        if "Address already in use" in str(e):
+            print(f"""
+  ⛔  Port {port} is already in use!
+
+  An old server may still be running. Kill it with:
+
+      lsof -ti:{port} | xargs kill -9
+
+  Then try again:
+
+      python app.py
+""")
+            sys.exit(1)
+        raise
 
     print(f"""
 ╔══════════════════════════════════════════════════════════╗
