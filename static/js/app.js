@@ -186,6 +186,8 @@ function SignalCard({ pair, data }) {
   const score = data.unified?.score || data.technical_score || 50;
   const conf = (data.unified?.confidence || 'LOW').toLowerCase();
   const info = data.pair_name || pair;
+  const comp = (data.unified?.components) || {};
+  const compKeys = Object.keys(comp).filter(k => comp[k] !== undefined && comp[k] !== null);
 
   return h('div', { className: 'signal-card fade-in' },
     h('div', { className: 'signal-card-header' },
@@ -227,10 +229,6 @@ function SignalCard({ pair, data }) {
 
     h(ScoreBar, { score, direction: dir }),
 
-    // Source component scores
-    const comp = data.unified?.components || {};
-    const compKeys = Object.keys(comp).filter(k => comp[k] !== undefined && comp[k] !== null);
-    
     h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '8px' } },
       h('span', {}, `Confidence: ${conf.toUpperCase()}`),
       h('span', {}, `Price: $${(data.current_price || 0).toFixed(data.type === 'forex' ? 5 : 2)}`),
