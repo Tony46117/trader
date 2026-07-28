@@ -34,13 +34,39 @@ class SignalStateManager:
         try:
             if os.path.exists(self._state_path):
                 with open(self._state_path) as f:
-                    self._active = json.load(f)
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        self._active = data
+                    else:
+                        self._active = {}
             if os.path.exists(self._history_path):
                 with open(self._history_path) as f:
-                    self._history = json.load(f)
-        except Exception:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        self._history = data
+                    else:
+                        self._history = []
+        except (json.JSONDecodeError, ValueError, IOError, OSError):
             self._active = {}
             self._history = []
+            # Remove corrupted files so they don't cause issues on next load
+            self._remove_corrupt_files()
+
+    def _remove_corrupt_files(self):
+        """Remove corrupt state files from disk."""
+        for path in [self._state_path, self._history_path]:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception:
+                pass
+
+    def reset(self):
+        """Reset all signal state (active + history) and remove persisted files."""
+        with self._lock:
+            self._active = {}
+            self._history = []
+            self._remove_corrupt_files()
 
     def _save(self):
         try:
