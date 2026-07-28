@@ -11,6 +11,7 @@ import os
 import sys
 import json
 import time
+import warnings
 import threading
 import urllib.parse
 import numpy as np
@@ -18,6 +19,10 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from functools import wraps
 from datetime import datetime
+
+# Suppress DeprecationWarning from third-party libraries (ccxt uses
+# deprecated datetime.datetime.utcfromtimestamp in Python 3.12)
+warnings.filterwarnings("ignore", message=".*utcfromtimestamp.*")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -232,7 +237,8 @@ class TraderHandler(BaseHTTPRequestHandler):
             handler, kwargs, query = _match_route(method, path)
             if handler:
                 result = handler(self, **(kwargs or {}), **(query or {}))
-                self._send_response(*result)
+                if result is not None:
+                    self._send_response(*result)
                 return
             self._send_response(*json_error("Route not found", 404))
             return
