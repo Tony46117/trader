@@ -695,6 +695,147 @@ h1, h2, h3 { font-weight: 700; letter-spacing: -0.02em; }
   to { transform: translateX(0); opacity: 1; }
 }
 
+/* ══════════════════════════════════════════════════════════
+   DIRECTION BADGES
+   ══════════════════════════════════════════════════════════ */
+
+.direction-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 14px;
+  border-radius: 100px;
+  font-weight: 700;
+  font-size: 0.8rem;
+  transition: var(--transition);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.direction-badge.dir-buy {
+  background: linear-gradient(135deg, var(--accent-green-dim), rgba(0,200,150,0.2));
+  color: var(--accent-green);
+  border: 1px solid rgba(0,200,150,0.3);
+  box-shadow: 0 0 20px rgba(0,200,150,0.15);
+}
+
+.direction-badge.dir-sell {
+  background: linear-gradient(135deg, var(--accent-red-dim), rgba(255,71,87,0.2));
+  color: var(--accent-red);
+  border: 1px solid rgba(255,71,87,0.3);
+  box-shadow: 0 0 20px rgba(255,71,87,0.15);
+}
+
+.direction-badge.dir-neutral {
+  background: rgba(255,255,255,0.05);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+/* ══════════════════════════════════════════════════════════
+   CME LEVELS PANEL
+   ══════════════════════════════════════════════════════════ */
+
+.cme-levels-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.cme-levels-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+  transition: var(--transition);
+}
+
+.cme-levels-card:hover {
+  border-color: var(--border-light);
+  box-shadow: var(--shadow-card);
+}
+
+.cme-levels-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cme-section {
+  margin-top: 8px;
+}
+
+.cme-section-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.cme-level-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cme-level-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  transition: var(--transition);
+}
+
+.cme-level-row.major {
+  background: linear-gradient(90deg, var(--bg-elevated), var(--bg-secondary));
+  border-left: 3px solid var(--accent-yellow);
+}
+
+.cme-level-price {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  color: var(--text-primary);
+  min-width: 80px;
+}
+
+.cme-level-detail {
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.cme-level-badge {
+  font-size: 0.65rem;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LIVE PRICE ANIMATION
+   ══════════════════════════════════════════════════════════ */
+
+.price-card.live .price-value {
+  transition: color 0.1s ease;
+}
+
+.price-card.live .price-value {
+  text-shadow: 0 0 10px rgba(0, 200, 150, 0.1);
+}
+
+@keyframes priceFlash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
 /* ── RESPONSIVE ─────────────────────────────────────────── */
 @media (max-width: 768px) {
   .header { padding: 0 1rem; }

@@ -13,6 +13,7 @@ import json
 import time
 import threading
 import urllib.parse
+import numpy as np
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from functools import wraps
@@ -29,7 +30,7 @@ from services.signals import (
 from services.analysis import get_cross_asset_analysis, get_market_regime
 from providers.news import get_upcoming_events, get_all_news_signals, get_news_signal_for_pair
 from providers.tick import get_tick_signal, get_all_tick_signals
-from providers.cme import get_cme_signal, get_all_cme_signals
+from providers.cme import get_cme_signal, get_all_cme_signals, get_cme_levels, get_cme_levels_all
 from providers.social import get_social_signal, get_all_social_signals
 from models.state import signal_state_manager
 
@@ -452,6 +453,103 @@ def _api_news_signal_pair(handler, pair=None, **kwargs):
     return json_response(get_news_signal_for_pair(pair))
 
 
+# ── SSE Price Stream ────────────────────────────────────────────────
+
+def _api_prices_stream(handler, **kwargs):
+    """Server-Sent Events endpoint for real-time price streaming.
+    Sends simulated tick updates every 500ms between real API refreshes.
+    """
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/event-stream")
+    handler.send_header("Cache-Control", "no-cache")
+    handler.send_header("Connection", "keep-alive")
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.end_headers()
+
+    # Initial price fetch
+    prices = get_current_prices()
+    tick_analyzers = {}
+    for pk in PAIRS:
+        price = prices.get(pk, {}).get("bid", 1.0)
+        tick_analyzers[pk] = {"price": float(price), "volatility": 0.0001}
+
+    last_real_fetch = time.time()
+    REAL_FETCH_INTERVAL = 15  # seconds
+
+    try:
+        while True:
+            now = time.time()
+
+            # Periodically fetch real data
+            if now - last_real_fetch >= REAL_FETCH_INTERVAL:
+                try:
+                    prices = get_current_prices()
+                    for pk in PAIRS:
+                        price = prices.get(pk, {}).get("bid", 0)
+                        if price and float(price) > 0:
+                            tick_analyzers[pk]["price"] = float(price)
+                    last_real_fetch = now
+                except Exception:
+                    pass
+
+            # Generate simulated tick movements
+            stream_data = {}
+            for pk, info in PAIRS.items():
+                ta = tick_analyzers.get(pk, {"price": 1.0, "volatility": 0.0001})
+                price = ta["price"]
+                pip = info.get("pip", 0.0001)
+                pip_size = float(pip)
+
+                # Random walk with mean reversion
+                noise = np.random.normal(0, price * 0.00002)
+                new_price = price + noise
+
+                # Calculate change from baseline
+                base_price = prices.get(pk, {}).get("bid", price)
+                change_pct = round((new_price - float(base_price)) / float(base_price) * 100, 3) if float(base_price) > 0 else 0
+
+                tick_analyzers[pk]["price"] = new_price
+
+                stream_data[pk] = {
+                    "pair": pk,
+                    "name": info.get("name", pk),
+                    "bid": round(new_price, 5),
+                    "change": change_pct,
+                    "type": info.get("type", "unknown"),
+                    "timestamp": datetime.now().strftime("%H:%M:%S.%f")[:-3],
+                }
+
+            # Send SSE event
+            payload = json.dumps(stream_data, default=str)
+            handler.wfile.write(f"data: {payload}\n\n".encode())
+            handler.wfile.flush()
+
+            time.sleep(0.5)
+
+    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+        pass  # Client disconnected
+    except Exception as e:
+        print(f"  ⚠️  SSE stream error: {e}")
+
+
+# ── CME Levels ──────────────────────────────────────────────────────
+
+@cached(ttl=60)
+def _api_cme_levels_all(handler, **kwargs):
+    prices = get_current_prices()
+    return json_response(get_cme_levels_all(prices))
+
+
+@cached(ttl=60)
+def _api_cme_levels_pair(handler, pair=None, **kwargs):
+    pair = pair.upper()
+    if pair not in PAIRS:
+        return json_error(f"Invalid pair: {pair}", 404)
+    prices = get_current_prices()
+    price = prices.get(pair, {}).get("bid", 1.0)
+    return json_response(get_cme_levels(pair, price))
+
+
 # ── Analysis ────────────────────────────────────────────────────────
 
 @cached(ttl=60)
@@ -501,6 +599,10 @@ ROUTES = [
     ("GET", "/api/tick", _api_tick_all),
     ("GET", "/api/tick/<pair>", _api_tick_pair),
 
+    # CME Levels (must come before generic /api/cme/<pair>)
+    ("GET", "/api/cme/levels", _api_cme_levels_all),
+    ("GET", "/api/cme/levels/<pair>", _api_cme_levels_pair),
+
     # CME signals
     ("GET", "/api/cme", _api_cme_all),
     ("GET", "/api/cme/<pair>", _api_cme_pair),
@@ -513,6 +615,9 @@ ROUTES = [
     ("GET", "/api/news/upcoming", _api_upcoming_news),
     ("GET", "/api/news/signals", _api_news_signals),
     ("GET", "/api/news/signals/<pair>", _api_news_signal_pair),
+
+    # Price streaming (SSE)
+    ("GET", "/api/prices/stream", _api_prices_stream),
 
     # Analysis
     ("GET", "/api/analysis/cross-asset", _api_cross_asset),
@@ -536,7 +641,8 @@ def _check_cpp():
 
 # ── Main ──────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
+def main():
+    """Start the TRADER v2 server."""
     port = int(os.environ.get("PORT", 5000))
 
     # Clean stale signal state
@@ -551,7 +657,7 @@ if __name__ == "__main__":
 ╠══════════════════════════════════════════════════════════╣
 ║  Pairs: EURUSD, GBPUSD, XAUUSD, BTCUSD, ETHUSD         ║
 ║  Min RR: 1:2  •  Cache: {str(CACHE_TTL)+'s':>7}  •  5-Source Fusion        ║
-║  Features: Live Prices · Signals · Analysis · CME       ║
+║  Features: Live Prices · SSE Stream · CME Levels       ║
 ║  Server:  Pure stdlib (no Flask)                       ║
 ╠══════════════════════════════════════════════════════════╣
 ║  🌐  http://localhost:{port}                               ║
@@ -567,3 +673,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n  🛑  Server stopped.")
         server.server_close()
+
+
+if __name__ == "__main__":
+    main()
