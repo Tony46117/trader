@@ -198,6 +198,111 @@ def get_upcoming_events(hours_ahead=72):
     return all_events
 
 
+def get_all_news(hours_past=24, hours_ahead=168):
+    """Get ALL economic events — recent past + upcoming — for the full News page.
+
+    Includes actual/forecast/previous values for every event.
+    """
+    all_events = []
+    for currency in ["USD", "EUR", "GBP"]:
+        try:
+            events = _generate_events_for_currency(currency, hours_ahead)
+            all_events.extend(events)
+        except Exception:
+            continue
+
+    # Also generate a few released events (past)
+    for currency in ["USD", "EUR", "GBP"]:
+        try:
+            past_events = _generate_past_events(currency, hours_past)
+            all_events.extend(past_events)
+        except Exception:
+            continue
+
+    all_events.sort(key=lambda x: x["timestamp"], reverse=True)
+    return all_events
+
+
+def _generate_past_events(currency, hours_past=24):
+    """Generate recently released events with actual data."""
+    templates = EVENT_TEMPLATES.get(currency, [])
+    now = datetime.now()
+    events = []
+    used_hours = set()
+
+    num_events = random.randint(3, 6)
+    templates_sample = random.sample(templates, min(num_events, len(templates)))
+
+    for template in templates_sample:
+        attempt = 0
+        hour_offset = None
+        while attempt < 20:
+            h = random.randint(-hours_past, -1)
+            if h not in used_hours:
+                hour_offset = h
+                used_hours.add(h)
+                break
+            attempt += 1
+
+        if hour_offset is None:
+            continue
+
+        event_time = now + timedelta(hours=hour_offset)
+        mins = event_time.minute
+        rounded_mins = 0 if mins < 15 else 30
+        event_time = event_time.replace(minute=rounded_mins, second=0, microsecond=0)
+
+        impact = template["impact"]
+        base_bias = template["bias"]
+
+        # Generate data as if it was just released
+        deviation = np.random.normal(0, 0.5)
+        forecast = round(np.random.uniform(-1.0, 3.0), 1)
+        actual = round(forecast + deviation, 1)
+        previous = round(np.random.uniform(-1.5, 2.5), 1)
+
+        if base_bias == "bullish":
+            if actual > forecast:
+                direction = "bullish"
+                reasoning = f"Actual ({actual}) exceeded forecast ({forecast}) — bullish release"
+            else:
+                direction = "bearish"
+                reasoning = f"Actual ({actual}) missed forecast ({forecast}) — bearish miss"
+        elif base_bias == "bearish":
+            if actual < forecast:
+                direction = "bearish"
+                reasoning = f"Actual ({actual}) below forecast ({forecast}) — bearish"
+            else:
+                direction = "bullish"
+                reasoning = f"Actual ({actual}) above forecast ({forecast}) — bullish beat"
+        else:
+            direction = "mixed"
+            reasoning = f"Actual ({actual}) vs forecast ({forecast}) — mixed impact"
+
+        confidence = "high" if abs(deviation) > 1.0 else "medium"
+        status = "recent"
+
+        events.append({
+            "date": event_time.strftime("%Y-%m-%d"),
+            "time": event_time.strftime("%H:%M"),
+            "datetime": event_time.strftime("%Y-%m-%d %H:%M"),
+            "currency": currency,
+            "impact": impact,
+            "event": template["event"],
+            "actual": str(actual),
+            "forecast": str(forecast),
+            "previous": str(previous),
+            "status": status,
+            "direction": direction,
+            "confidence": confidence,
+            "reasoning": reasoning,
+            "affected_pairs": CURRENCY_PAIRS.get(currency, []),
+            "timestamp": int(event_time.timestamp()),
+        })
+
+    return events
+
+
 # ── Per-Pair News Signal ─────────────────────────────────────────────
 
 def get_news_signal_for_pair(pair_key):

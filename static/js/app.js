@@ -137,6 +137,10 @@ function useNewsEvents() {
   return usePolling(() => API.get('/api/news/upcoming?hours=48'), 60000);
 }
 
+function useAllNews() {
+  return usePolling(() => API.get('/api/news/all?hours_past=24&hours_ahead=168'), 60000);
+}
+
 function useCMELevels() {
   return usePolling(() => API.get('/api/cme/levels'), 30000);
 }
@@ -919,6 +923,246 @@ function CMELevelsView() {
   );
 }
 
+/* ── News View ──────────────────────────────────────────────────── */
+
+function NewsView() {
+  const { data: allEvents, loading, error } = useAllNews();
+  const [filterCurrency, setFilterCurrency] = useState('all');
+  const [filterImpact, setFilterImpact] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [searchText, setSearchText] = useState('');
+
+  if (loading) return h(Loading);
+  if (error) return h(ErrorMsg, { message: error });
+  if (!allEvents || allEvents.length === 0) {
+    return h('div', { className: 'card fade-in' },
+      h('div', { className: 'card-header' },
+        h('span', { className: 'card-title' }, '📰 Economic Calendar'),
+      ),
+      h('p', { style: { color: 'var(--text-muted)', textAlign: 'center', padding: '40px' } },
+        'No economic events available at this time.'
+      ),
+    );
+  }
+
+  // Filters
+  let filtered = [...allEvents];
+
+  if (filterCurrency !== 'all') {
+    filtered = filtered.filter(e => e.currency === filterCurrency);
+  }
+  if (filterImpact !== 'all') {
+    filtered = filtered.filter(e => e.impact === filterImpact);
+  }
+  if (filterStatus !== 'all') {
+    filtered = filtered.filter(e => e.status === filterStatus);
+  }
+  if (searchText.trim()) {
+    const q = searchText.toLowerCase();
+    filtered = filtered.filter(e =>
+      e.event.toLowerCase().includes(q) ||
+      e.currency.toLowerCase().includes(q) ||
+      e.affected_pairs.some(p => p.toLowerCase().includes(q))
+    );
+  }
+
+  const activeCurrencies = [...new Set(allEvents.map(e => e.currency))];
+  const counts = {
+    upcoming: allEvents.filter(e => e.status === 'upcoming').length,
+    live: allEvents.filter(e => e.status === 'live').length,
+    recent: allEvents.filter(e => e.status === 'recent').length,
+  };
+
+  return h('div', { className: 'fade-in' },
+    // Header
+    h('div', { className: 'card-header', style: { marginBottom: '16px' } },
+      h('span', { className: 'card-title' }, '📰 Economic Calendar'),
+      h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
+        h(Badge, { text: `${counts.recent} Recent`, variant: 'low' }),
+        h(Badge, { text: `${counts.live} Live`, variant: 'high' }),
+        h(Badge, { text: `${counts.upcoming} Upcoming`, variant: 'medium' }),
+      ),
+    ),
+
+    // Filter bar
+    h('div', { className: 'news-filter-bar' },
+      // Currency filter
+      h('div', { className: 'news-filter-group' },
+        h('label', { className: 'news-filter-label' }, 'Currency'),
+        h('select', {
+          className: 'news-filter-select',
+          value: filterCurrency,
+          onChange: (e) => setFilterCurrency(e.target.value),
+        },
+          h('option', { value: 'all' }, 'All Currencies'),
+          ...activeCurrencies.map(c =>
+            h('option', { key: c, value: c }, c)
+          ),
+        ),
+      ),
+      // Impact filter
+      h('div', { className: 'news-filter-group' },
+        h('label', { className: 'news-filter-label' }, 'Impact'),
+        h('select', {
+          className: 'news-filter-select',
+          value: filterImpact,
+          onChange: (e) => setFilterImpact(e.target.value),
+        },
+          h('option', { value: 'all' }, 'All Impacts'),
+          h('option', { value: 'HIGH' }, '🔴 HIGH'),
+          h('option', { value: 'MEDIUM' }, '🟡 MEDIUM'),
+          h('option', { value: 'LOW' }, '🔵 LOW'),
+        ),
+      ),
+      // Status filter
+      h('div', { className: 'news-filter-group' },
+        h('label', { className: 'news-filter-label' }, 'Status'),
+        h('select', {
+          className: 'news-filter-select',
+          value: filterStatus,
+          onChange: (e) => setFilterStatus(e.target.value),
+        },
+          h('option', { value: 'all' }, 'All Status'),
+          h('option', { value: 'recent' }, '📋 Recent'),
+          h('option', { value: 'live' }, '🔴 Live'),
+          h('option', { value: 'upcoming' }, '⏳ Upcoming'),
+        ),
+      ),
+      // Search
+      h('div', { className: 'news-filter-group', style: { flex: 1, minWidth: '160px' } },
+        h('label', { className: 'news-filter-label' }, 'Search'),
+        h('input', {
+          className: 'news-filter-input',
+          type: 'text',
+          placeholder: 'Search events...',
+          value: searchText,
+          onChange: (e) => setSearchText(e.target.value),
+        }),
+      ),
+    ),
+
+    // Results count
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' } },
+      h('span', { style: { fontSize: '0.75rem', color: 'var(--text-muted)' } },
+        `Showing ${filtered.length} of ${allEvents.length} events`
+      ),
+      filtered.length !== allEvents.length
+        ? h('button', {
+            className: 'btn btn-outline btn-sm',
+            onClick: () => {
+              setFilterCurrency('all');
+              setFilterImpact('all');
+              setFilterStatus('all');
+              setSearchText('');
+            },
+          }, '↺ Clear Filters')
+        : null,
+    ),
+
+    // Events Table
+    filtered.length > 0
+      ? h('div', { className: 'news-table-container' },
+          h('table', { className: 'news-table' },
+            h('thead', {},
+              h('tr', {},
+                h('th', {}, 'Date / Time'),
+                h('th', {}, 'Currency'),
+                h('th', {}, 'Event'),
+                h('th', {}, 'Impact'),
+                h('th', { className: 'news-val-col' }, 'Actual'),
+                h('th', { className: 'news-val-col' }, 'Forecast'),
+                h('th', { className: 'news-val-col' }, 'Previous'),
+                h('th', {}, 'Direction'),
+                h('th', {}, 'Status'),
+              ),
+            ),
+            h('tbody', {},
+              ...filtered.map((evt, i) => {
+                const actStr = evt.actual !== '-' ? evt.actual : '—';
+                const fctStr = evt.forecast !== '-' ? evt.forecast : '—';
+                const prvStr = evt.previous !== '-' ? evt.previous : '—';
+
+                // Color code actual vs forecast
+                let actCls = '';
+                if (evt.actual !== '-' && evt.forecast !== '-') {
+                  const a = parseFloat(evt.actual);
+                  const f = parseFloat(evt.forecast);
+                  if (!isNaN(a) && !isNaN(f)) {
+                    if (a > f) actCls = 'beat';
+                    else if (a < f) actCls = 'miss';
+                  }
+                }
+
+                const impactCls = evt.impact === 'HIGH' ? 'high' : evt.impact === 'MEDIUM' ? 'medium' : 'low';
+                const dirCls = (evt.direction || 'neutral').toLowerCase();
+                const statusCls = ((evt.status || 'upcoming') === 'live' ? 'live' : evt.status === 'recent' ? 'recent' : 'upcoming');
+
+                return h('tr', { key: i, className: 'news-row' },
+                  // Date/Time
+                  h('td', { className: 'news-cell-date' },
+                    h('div', { style: { fontWeight: 600, fontSize: '0.8rem' } }, evt.date),
+                    h('div', { style: { color: 'var(--text-muted)', fontSize: '0.7rem' } }, evt.time),
+                  ),
+                  // Currency
+                  h('td', { className: 'news-cell-ccy' },
+                    h('span', { className: 'news-ccy-badge' }, evt.currency),
+                  ),
+                  // Event name
+                  h('td', { className: 'news-cell-event' },
+                    h('div', { style: { fontWeight: 500, fontSize: '0.85rem' } }, evt.event),
+                    evt.reasoning
+                      ? h('div', { style: { fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '2px' } }, evt.reasoning)
+                      : null,
+                  ),
+                  // Impact
+                  h('td', {},
+                    h('span', { className: `news-impact-badge impact-${impactCls}` }, evt.impact),
+                  ),
+                  // Actual
+                  h('td', { className: `news-val-cell ${actCls}` },
+                    actStr,
+                    actStr !== '—' && actCls
+                      ? h('span', { className: 'news-beat-miss' }, actCls === 'beat' ? '▲' : '▼')
+                      : null,
+                  ),
+                  // Forecast
+                  h('td', { className: 'news-val-cell' }, fctStr),
+                  // Previous
+                  h('td', { className: 'news-val-cell' }, prvStr),
+                  // Direction
+                  h('td', {},
+                    h('span', {
+                      className: `news-dir-badge ${dirCls}`,
+                    }, dirCls === 'bullish' ? '🟢' : dirCls === 'bearish' ? '🔴' : '⚪'),
+                  ),
+                  // Status
+                  h('td', {},
+                    h('span', { className: `news-status-badge ${statusCls}` },
+                      statusCls === 'recent' ? '📋' : statusCls === 'live' ? '🔴' : '⏳'
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+        )
+      : h('div', { className: 'card', style: { textAlign: 'center', padding: '40px' } },
+          h('p', { style: { color: 'var(--text-muted)' } }, 'No events match your filters.'),
+          h('button', {
+            className: 'btn btn-outline',
+            style: { marginTop: '12px' },
+            onClick: () => {
+              setFilterCurrency('all');
+              setFilterImpact('all');
+              setFilterStatus('all');
+              setSearchText('');
+            },
+          }, '↺ Clear Filters'),
+        ),
+  );
+}
+
+
 /* ── App Root ──────────────────────────────────────────────────── */
 
 function App() {
@@ -927,6 +1171,7 @@ function App() {
   const navItems = [
     { id: 'dashboard', icon: 'fas fa-chart-line', label: 'Dashboard' },
     { id: 'signals', icon: 'fas fa-bolt', label: 'Signals' },
+    { id: 'news', icon: 'fas fa-newspaper', label: 'News' },
     { id: 'analysis', icon: 'fas fa-globe', label: 'Analysis' },
     { id: 'cme', icon: 'fas fa-diamond', label: 'CME Levels' },
   ];
@@ -959,6 +1204,7 @@ function App() {
     h('main', { className: 'main-content' },
       view === 'dashboard' ? h(DashboardView) :
       view === 'signals' ? h(SignalsView) :
+      view === 'news' ? h(NewsView) :
       view === 'analysis' ? h(AnalysisView) :
       view === 'cme' ? h(CMELevelsView) :
       h(DashboardView),

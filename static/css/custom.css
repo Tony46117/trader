@@ -1148,6 +1148,210 @@ h1, h2, h3 { font-weight: 700; letter-spacing: -0.02em; }
   50% { opacity: 0.7; }
 }
 
+/* ══════════════════════════════════════════════════════════
+   NEWS PAGE — Economic Calendar Table
+   ══════════════════════════════════════════════════════════ */
+
+.news-filter-bar {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 14px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  align-items: flex-end;
+}
+
+.news-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 130px;
+}
+
+.news-filter-label {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.news-filter-select,
+.news-filter-input {
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-family: inherit;
+  outline: none;
+  transition: var(--transition);
+  min-width: 120px;
+}
+
+.news-filter-select:focus,
+.news-filter-input:focus {
+  border-color: var(--accent-green);
+  box-shadow: 0 0 0 2px var(--accent-green-dim);
+}
+
+.news-filter-input::placeholder {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.news-table-container {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+}
+
+.news-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  min-width: 800px;
+}
+
+.news-table thead {
+  background: var(--bg-secondary);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.news-table th {
+  text-align: left;
+  padding: 10px 12px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.news-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.news-row {
+  transition: var(--transition);
+}
+
+.news-row:hover {
+  background: var(--bg-card-hover);
+}
+
+.news-row:last-child td {
+  border-bottom: none;
+}
+
+.news-cell-date {
+  white-space: nowrap;
+}
+
+.news-cell-ccy {
+  white-space: nowrap;
+}
+
+.news-ccy-badge {
+  display: inline-flex;
+  padding: 2px 10px;
+  border-radius: 100px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+
+.news-cell-event {
+  max-width: 280px;
+  min-width: 180px;
+}
+
+.news-impact-badge {
+  display: inline-flex;
+  padding: 2px 10px;
+  border-radius: 100px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.news-impact-badge.impact-high {
+  background: var(--accent-red-dim);
+  color: var(--accent-red);
+  border: 1px solid rgba(255,71,87,0.2);
+}
+
+.news-impact-badge.impact-medium {
+  background: var(--accent-yellow-dim);
+  color: var(--accent-yellow);
+  border: 1px solid rgba(255,217,61,0.2);
+}
+
+.news-impact-badge.impact-low {
+  background: var(--accent-blue-dim);
+  color: var(--accent-blue);
+  border: 1px solid rgba(77,171,247,0.2);
+}
+
+.news-val-col {
+  text-align: right !important;
+  min-width: 70px;
+}
+
+.news-val-cell {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.news-val-cell.beat {
+  color: var(--accent-green);
+}
+
+.news-val-cell.miss {
+  color: var(--accent-red);
+}
+
+.news-beat-miss {
+  margin-left: 4px;
+  font-size: 0.65rem;
+}
+
+.news-dir-badge {
+  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+}
+
+.news-dir-badge.bullish {
+  color: var(--accent-green);
+}
+
+.news-dir-badge.bearish {
+  color: var(--accent-red);
+}
+
+.news-status-badge {
+  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+}
+
 /* ── RESPONSIVE ─────────────────────────────────────────── */
 @media (max-width: 768px) {
   .header { padding: 0 1rem; }

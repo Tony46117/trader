@@ -33,7 +33,7 @@ from services.signals import (
     generate_all_unified_signals, get_top_setups,
 )
 from services.analysis import get_cross_asset_analysis, get_market_regime
-from providers.news import get_upcoming_events, get_all_news_signals, get_news_signal_for_pair
+from providers.news import get_upcoming_events, get_all_news_signals, get_news_signal_for_pair, get_all_news
 from providers.tick import get_tick_signal, get_all_tick_signals
 from providers.cme import get_cme_signal, get_all_cme_signals, get_cme_levels, get_cme_levels_all
 from providers.social import get_social_signal, get_all_social_signals
@@ -402,6 +402,18 @@ def _api_tick_pair(handler, pair=None, **kwargs):
     return json_response(get_tick_signal(pair, price))
 
 
+@cached(ttl=120)
+def _api_all_news(handler, hours_past=None, hours_ahead=None, **kwargs):
+    """Return ALL news events (past + future) for the News page."""
+    hp = int(hours_past[0]) if hours_past and isinstance(hours_past, list) else 24
+    ha = int(hours_ahead[0]) if hours_ahead and isinstance(hours_ahead, list) else 168
+    if isinstance(hp, str):
+        hp = int(hp)
+    if isinstance(ha, str):
+        ha = int(ha)
+    return json_response(get_all_news(hours_past=hp, hours_ahead=ha))
+
+
 # ── CME Signals ─────────────────────────────────────────────────────
 
 @cached(ttl=60)
@@ -618,6 +630,7 @@ ROUTES = [
     ("GET", "/api/social/<pair>", _api_social_pair),
 
     # News
+    ("GET", "/api/news/all", _api_all_news),
     ("GET", "/api/news/upcoming", _api_upcoming_news),
     ("GET", "/api/news/signals", _api_news_signals),
     ("GET", "/api/news/signals/<pair>", _api_news_signal_pair),
