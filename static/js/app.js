@@ -3,7 +3,8 @@
  *   TRADER v2 — React SPA
  *   Forex Trading Signal Framework Frontend
  *   Features: Real-time SSE streaming · CME Levels · 
- *   Clear BUY/SELL signals · Cross-asset analysis
+ *   Clear BUY/SELL signals · Cross-asset analysis · 
+ *   Live indicator values (RSI: 57, MACD, BB, etc.)
  * ══════════════════════════════════════════════════════════
  */
 
@@ -91,7 +92,6 @@ function useSSEPrices() {
         if (mounted) {
           setConnected(false);
           eventSource.close();
-          // Reconnect after 3s
           reconnectTimer = setTimeout(connect, 3000);
         }
       };
@@ -177,6 +177,11 @@ function FormatPrice({ value, decimals = 5 }) {
   return Number(value).toFixed(decimals);
 }
 
+function BiasDot({ direction }) {
+  const dir = (direction || 'neutral').toLowerCase();
+  return h('span', { className: `bias-dot bias-${dir}` });
+}
+
 /* ── Big Direction Badge ───────────────────────────────────────── */
 function DirectionBadge({ direction, score, size = 'normal' }) {
   const dir = (direction || 'NEUTRAL').toLowerCase();
@@ -193,7 +198,6 @@ function DirectionBadge({ direction, score, size = 'normal' }) {
 function PriceCard({ pair, data, livePrice }) {
   if (!data && !livePrice) return null;
 
-  // Use SSE live price if available, fall back to API data
   const price = livePrice ? livePrice.bid : (data ? data.price : 0);
   const change = livePrice ? livePrice.change : (data ? data.change : 0);
   const dir = livePrice ? 'neutral' : ((data ? data.direction || '' : '')).toLowerCase();
@@ -257,16 +261,32 @@ function SignalCard({ pair, data }) {
   const comp = (data.unified?.components) || {};
   const compKeys = Object.keys(comp).filter(k => comp[k] !== undefined && comp[k] !== null);
   const verdict = data.unified?.verdict || '';
+  const details = data.technical_details || [];
+  const techIndicators = data.technical_indicators || {};
+
+  // Summary key indicators for top row
+  const rsiVal = techIndicators.rsi;
 
   return h('div', { className: 'signal-card fade-in' },
+    // Header: pair name + direction badge + key indicators
     h('div', { className: 'signal-card-header' },
       h('div', { className: 'signal-pair-info' },
         h('span', { className: 'signal-pair-name' }, info),
         h('span', { className: 'signal-pair-type' }, data.type || '—'),
       ),
-      h(DirectionBadge, { direction: dir, score }),
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+        // Key indicator snapshot inline
+        rsiVal != null
+          ? h('span', {
+              className: `indicator-pill ${rsiVal >= 60 ? 'warm' : rsiVal <= 40 ? 'cool' : ''}`,
+              title: 'RSI(14)',
+            }, `RSI: ${Number(rsiVal).toFixed(1)}`)
+          : null,
+        h(DirectionBadge, { direction: dir, score }),
+      ),
     ),
 
+    // Entry levels (if setup valid)
     data.setup_valid && (data.entry || data.sl)
       ? h('div', { className: 'signal-levels' },
           h('div', { className: 'signal-level' },
@@ -290,53 +310,72 @@ function SignalCard({ pair, data }) {
         )
       : null,
 
+    // Score bar
     h(ScoreBar, { score, direction: dir }),
 
+    // Confidence + score row
     h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '8px' } },
       h('span', {}, `Confidence: ${conf.toUpperCase()}`),
       h('span', {}, `Score: ${score}  •  ${data.unified?.agreement || verdict}`),
     ),
 
+    // Source component badges
     compKeys.length > 0
       ? h('div', { style: { display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '8px' } },
           ...compKeys.map(k => {
             const val = comp[k];
             const color = val >= 65 ? 'var(--accent-green)' : val <= 35 ? 'var(--accent-red)' : 'var(--text-muted)';
+            const icons = { technical: '📊', news: '📰', tick: '⚡', cme: '💎', social: '💬' };
             return h('span', {
               key: k,
               style: { fontSize: '0.6rem', padding: '2px 6px', borderRadius: '4px', background: 'var(--bg-secondary)', color },
             title: `${k}: ${val}`,
-          }, `${k === 'technical' ? '📊' : k === 'news' ? '📰' : k === 'tick' ? '⚡' : k === 'cme' ? '💎' : k === 'social' ? '💬' : k.slice(0,3)} ${val}`);
+          }, `${icons[k] || k.slice(0,3)} ${val}`);
           })
         )
       : null,
 
-    data.technical_details && data.technical_details.length > 0
-      ? h('details', { style: { marginTop: '12px' } },
-          h('summary', { style: { cursor: 'pointer', fontSize: '0.75rem', color: 'var(--text-secondary)' } },
-            `Indicators (${data.technical_details.length})`
-          ),
-          h('table', { className: 'indicator-table', style: { marginTop: '8px' } },
-            h('thead', {},
-              h('tr', {},
-                h('th', {}, 'Indicator'),
-                h('th', {}, 'Signal'),
-                h('th', {}, 'Value'),
-                h('th', {}, 'Weight'),
-              ),
-            ),
-            h('tbody', {},
-              ...data.technical_details.map((d, i) =>
-                h('tr', { key: i },
-                  h('td', { style: { fontSize: '0.7rem' } }, d.indicator || '—'),
-                  h('td', { className: `indicator-cell ${(d.signal || '').toLowerCase().includes('buy') ? 'buy' : (d.signal || '').toLowerCase().includes('sell') ? 'sell' : 'neutral'}` },
-                    d.signal || '—'
-                  ),
-                  h('td', { style: { fontFamily: 'JetBrains Mono, monospace', fontSize: '0.7rem' } }, d.value || '—'),
-                  h('td', { style: { fontSize: '0.7rem', color: 'var(--text-muted)' } }, d.weight || '—'),
-                )
-              ),
-            ),
+    // ── ALWAYS-VISIBLE INDICATORS TABLE (no longer collapsed) ──
+    details.length > 0
+      ? h('div', { className: 'indicators-section' },
+          h('div', { className: 'indicators-section-title' }, '📊 Technical Indicators'),
+          h('div', { className: 'indicators-grid' },
+            ...details.map((d, i) => {
+              const sigDir = (d.signal || '').toLowerCase();
+              const isBuy = sigDir.includes('buy');
+              const isSell = sigDir.includes('sell');
+              const sigColor = isBuy ? 'var(--accent-green)' : isSell ? 'var(--accent-red)' : 'var(--text-secondary)';
+              const sigIcon = isBuy ? '🟢' : isSell ? '🔴' : '⚪';
+              const barW = d.weight ? (d.weight / 20) * 100 : 50;
+
+              return h('div', { key: i, className: 'indicator-row' },
+                h('div', { className: 'indicator-name' },
+                  h('span', { style: { fontSize: '0.65rem', color: 'var(--text-muted)' } }, d.indicator || '—'),
+                ),
+                h('div', { className: 'indicator-signal' },
+                  h('span', {
+                    style: {
+                      display: 'inline-flex', alignItems: 'center', gap: '3px',
+                      fontSize: '0.7rem', fontWeight: 600, color: sigColor,
+                    }
+                  }, `${sigIcon} ${d.signal || '—'}`),
+                ),
+                h('div', { className: 'indicator-value' },
+                  d.value
+                    ? h('span', { className: 'mono', style: { fontSize: '0.75rem', fontWeight: 600 } }, d.value)
+                    : h('span', { style: { fontSize: '0.65rem', color: 'var(--text-muted)' } }, '—'),
+                ),
+                h('div', { className: 'indicator-bar-container' },
+                  h('div', {
+                    className: `indicator-weight-bar ${isBuy ? 'bullish' : isSell ? 'bearish' : 'neutral'}`,
+                    style: { width: `${barW}%` },
+                  }),
+                ),
+                h('div', { className: 'indicator-reason', style: { color: 'var(--text-muted)' } },
+                  d.reason || '—',
+                ),
+              );
+            }),
           ),
         )
       : null,
@@ -403,7 +442,7 @@ function ActiveSignalPanel({ signals }) {
   );
 }
 
-/* ── CME Levels Panel ────────────────────────────────────────────── */
+/* ── CME Levels Panel (enhanced with calls/puts OI + volume) ──────── */
 
 function CMELevelsPanel() {
   const { data: levels, loading, error } = useCMELevels();
@@ -426,25 +465,40 @@ function CMELevelsPanel() {
         const maxPain = data.max_pain;
 
         return h('div', { key: pair, className: 'cme-levels-card' },
+          // Header
           h('div', { className: 'cme-levels-header' },
             h('div', {},
               h('span', { style: { fontWeight: 700, fontSize: '1rem' } }, pair),
-              h('span', { style: { display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' } },
-              'Max Pain: ', h(FormatPrice, { value: maxPain }), '  |  Current: ', h(FormatPrice, { value: current })
-            ),
+              h('span', { style: { display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px' } },
+                'Max Pain: ', h('span', { className: 'mono' }, h(FormatPrice, { value: maxPain })),
+                '  |  Current: ', h('span', { className: 'mono' }, h(FormatPrice, { value: current })),
+              ),
             ),
             h('span', {
-              style: {
-                padding: '2px 10px',
-                borderRadius: '100px',
-                fontSize: '0.7rem',
-                fontWeight: 600,
-                background: data.pc_sentiment === 'bullish' ? 'var(--accent-green-dim)' :
-                           data.pc_sentiment === 'bearish' ? 'var(--accent-red-dim)' : 'rgba(255,255,255,0.05)',
-                color: data.pc_sentiment === 'bullish' ? 'var(--accent-green)' :
-                       data.pc_sentiment === 'bearish' ? 'var(--accent-red)' : 'var(--text-secondary)',
-              }
+              className: `cme-sentiment-badge ${data.pc_sentiment || 'neutral'}`,
             }, `P/C: ${data.put_call_ratio_oi || '—'}`),
+          ),
+
+          // OI Profile Summary
+          h('div', { className: 'cme-oi-summary' },
+            h('div', { className: 'cme-oi-item' },
+              h('span', { className: 'cme-oi-label' }, 'Call OI'),
+              h('span', { className: 'cme-oi-value call' }, (data.total_call_oi || 0).toLocaleString()),
+              h('span', { className: 'cme-oi-vol' }, `Vol: ${(data.total_call_volume || 0).toLocaleString()}`),
+            ),
+            h('div', { className: 'cme-oi-divider' }, '|'),
+            h('div', { className: 'cme-oi-item' },
+              h('span', { className: 'cme-oi-label' }, 'Put OI'),
+              h('span', { className: 'cme-oi-value put' }, (data.total_put_oi || 0).toLocaleString()),
+              h('span', { className: 'cme-oi-vol' }, `Vol: ${(data.total_put_volume || 0).toLocaleString()}`),
+            ),
+            h('div', { className: 'cme-oi-divider' }, '|'),
+            h('div', { className: 'cme-oi-item' },
+              h('span', { className: 'cme-oi-label' }, 'P/C Vol Ratio'),
+              h('span', { className: `cme-oi-value ${data.put_call_ratio_vol < 0.85 ? 'call' : data.put_call_ratio_vol > 1.15 ? 'put' : ''}` },
+                data.put_call_ratio_vol || '—'
+              ),
+            ),
           ),
 
           // Support Levels
@@ -457,11 +511,11 @@ function CMELevelsPanel() {
                       h('span', { className: 'cme-level-price' },
                         h(FormatPrice, { value: s.price, decimals: pair.includes('USD') ? 5 : 2 })
                       ),
-                      h('span', { className: 'cme-level-detail' },
-                        `OI: ${(s.total_oi || 0).toLocaleString()}`
+                      h('span', { className: 'cme-level-detail', title: 'Call OI | Put OI' },
+                        `C:${(s.call_oi || 0).toLocaleString()}  P:${(s.put_oi || 0).toLocaleString()}`
                       ),
-                      h('span', { className: 'cme-level-detail' },
-                        `C:${(s.call_volume || 0).toLocaleString()} P:${(s.put_volume || 0).toLocaleString()}`
+                      h('span', { className: 'cme-level-detail', title: 'Intraday Call Vol | Put Vol' },
+                        `▸${(s.call_volume || 0).toLocaleString()}/${(s.put_volume || 0).toLocaleString()}`
                       ),
                       h('span', {
                         className: 'cme-level-badge',
@@ -486,11 +540,11 @@ function CMELevelsPanel() {
                       h('span', { className: 'cme-level-price' },
                         h(FormatPrice, { value: s.price, decimals: pair.includes('USD') ? 5 : 2 })
                       ),
-                      h('span', { className: 'cme-level-detail' },
-                        `OI: ${(s.total_oi || 0).toLocaleString()}`
+                      h('span', { className: 'cme-level-detail', title: 'Call OI | Put OI' },
+                        `C:${(s.call_oi || 0).toLocaleString()}  P:${(s.put_oi || 0).toLocaleString()}`
                       ),
-                      h('span', { className: 'cme-level-detail' },
-                        `C:${(s.call_volume || 0).toLocaleString()} P:${(s.put_volume || 0).toLocaleString()}`
+                      h('span', { className: 'cme-level-detail', title: 'Intraday Call Vol | Put Vol' },
+                        `▸${(s.call_volume || 0).toLocaleString()}/${(s.put_volume || 0).toLocaleString()}`
                       ),
                       h('span', {
                         className: 'cme-level-badge',
@@ -505,10 +559,16 @@ function CMELevelsPanel() {
               : h('div', { style: { color: 'var(--text-muted)', fontSize: '0.75rem', padding: '8px' } }, 'No significant levels'),
           ),
 
-          // Volume Summary
-          h('div', { style: { marginTop: '12px', padding: '8px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-secondary)' } },
+          // Bottom Volume Summary
+          h('div', { className: 'cme-vol-footer' },
             h('span', {}, `Total Call OI: ${(data.total_call_oi || 0).toLocaleString()}`),
             h('span', {}, `Total Put OI: ${(data.total_put_oi || 0).toLocaleString()}`),
+            h('span', { style: { color: 'var(--accent-green)' } },
+              `Call Vol: ${(data.total_call_volume || 0).toLocaleString()}`
+            ),
+            h('span', { style: { color: 'var(--accent-red)' } },
+              `Put Vol: ${(data.total_put_volume || 0).toLocaleString()}`
+            ),
             h('span', {}, `Vol Ratio: ${data.put_call_ratio_vol || '—'}`),
           ),
         );
@@ -517,7 +577,7 @@ function CMELevelsPanel() {
   );
 }
 
-/* ── Analysis Panel ────────────────────────────────────────────────── */
+/* ── Analysis Panel (enhanced with bias badges for each asset) ────── */
 
 function AnalysisPanel() {
   const { data: analysis, loading: al, error: ae } = useAnalysisData();
@@ -527,6 +587,7 @@ function AnalysisPanel() {
   if (ae || re) return h(ErrorMsg, { message: ae || re });
 
   return h('div', { className: 'fade-in' },
+    // Regime
     regime
       ? h('div', { className: 'card', style: { marginBottom: '16px' } },
           h('div', { className: 'card-header' },
@@ -543,9 +604,11 @@ function AnalysisPanel() {
 
     analysis
       ? h('div', { className: 'analysis-grid' },
+          // DXY Card
           h('div', { className: 'card' },
             h('div', { className: 'card-header' },
               h('span', { className: 'card-title' }, '🇺🇸 US Dollar Index'),
+              h(BiasDot, { direction: analysis.dxy?.trend }),
             ),
             h('div', { className: 'analysis-item' },
               h('span', { className: 'analysis-label' }, 'Value'),
@@ -558,53 +621,102 @@ function AnalysisPanel() {
               ),
             ),
             h('div', { className: 'analysis-item' },
-              h('span', { className: 'analysis-label' }, 'Implication'),
-              h('span', { style: { fontSize: '0.75rem', textAlign: 'right', maxWidth: '60%', color: 'var(--text-secondary)' } },
+              h('span', { className: 'analysis-label' }, 'Bias'),
+              h(DirectionBadge, {
+                direction: analysis.dxy?.trend === 'bullish' ? 'BUY' : analysis.dxy?.trend === 'bearish' ? 'SELL' : 'NEUTRAL',
+                size: 'small',
+              }),
+            ),
+            h('div', { className: 'analysis-item' },
+              h('span', { className: 'analysis-label' }, 'Strength'),
+              h('span', { className: `analysis-value ${analysis.dxy?.strength === 'strong' ? 'bullish' : ''}` },
+                (analysis.dxy?.strength || '—').toUpperCase()
+              ),
+            ),
+            h('div', { className: 'analysis-item' },
+              h('span', { className: 'analysis-label' }, 'Forex Implication'),
+              h('span', { style: { fontSize: '0.7rem', textAlign: 'right', maxWidth: '60%', color: 'var(--text-secondary)' } },
                 analysis.dxy?.implication || '—'
               ),
             ),
           ),
 
+          // VIX Card
           h('div', { className: 'card' },
             h('div', { className: 'card-header' },
               h('span', { className: 'card-title' }, '🌊 VIX — Volatility'),
+              h(BiasDot, { direction: analysis.vix?.trend === 'bullish' ? 'bearish' : analysis.vix?.trend === 'bearish' ? 'bullish' : 'neutral' }),
             ),
             h('div', { className: 'analysis-item' },
               h('span', { className: 'analysis-label' }, 'Value'),
               h('span', { className: 'analysis-value' }, (analysis.vix?.value || 0).toFixed(2)),
             ),
             h('div', { className: 'analysis-item' },
+              h('span', { className: 'analysis-label' }, 'Change'),
+              h('span', { className: `analysis-value ${analysis.vix?.trend === 'bullish' ? 'bearish' : 'bullish'}` },
+                `${analysis.vix?.change >= 0 ? '+' : ''}${(analysis.vix?.change || 0).toFixed(2)}%`
+              ),
+            ),
+            h('div', { className: 'analysis-item' },
               h('span', { className: 'analysis-label' }, 'Regime'),
-              h('span', { className: 'analysis-value' }, (analysis.vix?.regime || '—').toUpperCase()),
+              h('span', {
+                className: 'analysis-value',
+                style: {
+                  color: (analysis.vix?.regime || '').includes('low') ? 'var(--accent-green)' :
+                         (analysis.vix?.regime || '').includes('stress') ? 'var(--accent-red)' :
+                         (analysis.vix?.regime || '').includes('elevated') ? 'var(--accent-yellow)' : 'var(--text-secondary)',
+                }
+              }, (analysis.vix?.regime || '—').toUpperCase()),
+            ),
+            h('div', { className: 'analysis-item' },
+              h('span', { className: 'analysis-label' }, 'Bias'),
+              h('span', {
+                className: `direction-badge dir-${analysis.vix?.value < 20 ? 'buy' : 'sell'}`,
+                style: { fontSize: '0.7rem', padding: '2px 10px' },
+              }, analysis.vix?.value < 20 ? '👍 RISK ON' : '⚠️ CAUTION'),
             ),
             h('div', { className: 'analysis-item' },
               h('span', { className: 'analysis-label' }, 'Implication'),
-              h('span', { style: { fontSize: '0.75rem', textAlign: 'right', maxWidth: '60%', color: 'var(--text-secondary)' } },
+              h('span', { style: { fontSize: '0.7rem', textAlign: 'right', maxWidth: '60%', color: 'var(--text-secondary)' } },
                 analysis.vix?.implication || '—'
               ),
             ),
           ),
 
+          // Treasury Yields Card
           h('div', { className: 'card', style: { gridColumn: '1 / -1' } },
             h('div', { className: 'card-header' },
               h('span', { className: 'card-title' }, '🏦 US Treasury Yields'),
+              h(Badge, {
+                text: `Curve: ${(analysis.yields?.curve || '—').toUpperCase()}`,
+                variant: analysis.yields?.curve === 'inverted' ? 'sell' : 'buy',
+              }),
             ),
-            h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '12px' } },
+            h('div', { className: 'yields-grid' },
               ['US5Y', 'US10Y', 'US30Y'].map(key => {
                 const y = analysis.yields?.[key] || {};
-                return h('div', { key, className: 'signal-level' },
-                  h('div', { className: 'signal-level-label' }, key.replace('US', '') + 'Y'),
-                  h('div', { className: 'signal-level-value' },
+                const yTrend = (y.trend || 'neutral').toLowerCase();
+                return h('div', { key, className: 'yield-card' },
+                  h('div', { className: 'yield-header' },
+                    h('span', { className: 'yield-tenor' }, key.replace('US', '')),
+                    h(BiasDot, { direction: yTrend }),
+                  ),
+                  h('div', { className: 'yield-value' },
                     `${(y.value || 0).toFixed(2)}%`
                   ),
-                  h('div', { style: { fontSize: '0.65rem', color: y.trend === 'bullish' ? 'var(--accent-green)' : 'var(--accent-red)' } },
+                  h('div', {
+                    className: `yield-change ${yTrend === 'bullish' ? 'positive' : 'negative'}`,
+                  },
                     `${y.change >= 0 ? '+' : ''}${(y.change || 0).toFixed(2)}%`
+                  ),
+                  h('div', { className: 'yield-label' },
+                    `${((y.value || 0) * 100).toFixed(0)} bps`
                   ),
                 );
               }),
             ),
-            h('div', { style: { fontSize: '0.75rem', color: 'var(--text-secondary)', textAlign: 'center' } },
-              `Curve: ${(analysis.yields?.curve || '—').toUpperCase()} — ${analysis.yields?.implication || '—'}`
+            h('div', { style: { marginTop: '12px', fontSize: '0.75rem', color: 'var(--text-secondary)', textAlign: 'center' } },
+              analysis.yields?.implication || '—'
             ),
           ),
         )
@@ -629,11 +741,18 @@ function TopSetupsPanel() {
     h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
       ...Object.entries(setups).map(([pair, data]) => {
         const dir = (data.unified?.direction || '').toLowerCase();
+        const rsiVal = data.technical_indicators?.rsi;
         return h('div', { key: pair, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)' } },
           h('div', {},
             h('div', { style: { fontWeight: 600, fontSize: '0.9rem' } }, data.pair_name || pair),
-            h('div', { style: { fontSize: '0.7rem', color: 'var(--text-muted)' } },
-              `Score: ${data.unified?.score || '—'}  •  R:R ${data.rr1 || '?'}:1`
+            h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', fontSize: '0.7rem', color: 'var(--text-muted)' } },
+              h('span', {}, `Score: ${data.unified?.score || '—'}`),
+              rsiVal != null
+                ? h('span', { className: `indicator-pill ${rsiVal >= 60 ? 'warm' : rsiVal <= 40 ? 'cool' : ''}` },
+                    `RSI: ${Number(rsiVal).toFixed(1)}`
+                  )
+                : null,
+              h('span', {}, `R:R ${data.rr1 || '?'}:1`),
             ),
           ),
           h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },

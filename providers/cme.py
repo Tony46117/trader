@@ -236,6 +236,8 @@ def get_cme_levels(pair_key, current_price):
         "put_call_ratio_vol": round(pc_vol_ratio, 3),
         "total_call_oi": total_call_oi,
         "total_put_oi": total_put_oi,
+        "total_call_volume": total_call_vol,
+        "total_put_volume": total_put_vol,
         "supports": supports,
         "resistances": resistances,
         "chain": chain,
