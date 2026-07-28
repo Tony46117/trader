@@ -4,13 +4,20 @@
 ╠══════════════════════════════════════════════════════════╣
 ║  Analyzes CME futures positioning, open interest,       ║
 ║  options max pain, gamma levels, and put/call ratios.   ║
-║  Returns directional signal + detailed option chain.    ║
+║                                                          ║
+║  Uses REAL data from Deribit API for BTC and ETH.       ║
+║  Falls back to simulated data for EURUSD, GBPUSD,       ║
+║  XAUUSD (no free real-time CME options API available).  ║
+║  Each response includes a "data_source" field.          ║
 ╚══════════════════════════════════════════════════════════╝
 """
 import numpy as np
 import random
 from datetime import datetime
 from config import PAIRS
+
+# Real options data for crypto pairs
+from providers.deribit import get_option_chain as _deribit_chain, get_signal_from_chain as _deribit_signal
 
 CME_FUTURES = {
     "EURUSD": {"future": "6E", "name": "Euro FX", "point_value": 125000, "strike_step": 0.0025},
@@ -19,6 +26,9 @@ CME_FUTURES = {
     "BTCUSD": {"future": "BTC", "name": "Bitcoin", "point_value": 5, "strike_step": 500.0},
     "ETHUSD": {"future": "ETH", "name": "Ethereum", "point_value": 50, "strike_step": 25.0},
 }
+
+# Pairs that have real options data via Deribit
+_REAL_OPTIONS_PAIRS = {"BTCUSD", "ETHUSD"}
 
 
 def _get_seed(pair_key):
@@ -131,14 +141,50 @@ def _find_key_levels(chain, current_price):
 
 
 def get_cme_signal(pair_key, current_price):
-    """Generate CME-based signal score (0-100)."""
+    """Generate CME-based signal score (0-100).
+    
+    Uses REAL Deribit data for BTC/ETH.
+    Falls back to simulated data for EURUSD, GBPUSD, XAUUSD.
+    """
+    price = float(current_price) if current_price else 1.0
+
+    # ── REAL data path: Deribit for BTC/ETH ──
+    if pair_key in _REAL_OPTIONS_PAIRS:
+        chain_data = _deribit_chain(pair_key, price)
+        if chain_data:
+            signal = _deribit_signal(pair_key, chain_data)
+            return {
+                "score": signal["score"],
+                "direction": signal["direction"],
+                "pair": pair_key,
+                "max_pain": chain_data.get("max_pain", 0),
+                "current_price": chain_data.get("current_price", price),
+                "put_call_ratio_oi": chain_data.get("put_call_ratio_oi", 1.0),
+                "put_call_ratio_vol": chain_data.get("put_call_ratio_vol", 1.0),
+                "pc_sentiment": chain_data.get("pc_sentiment", "neutral"),
+                "positioning": "deribit_oi_derived",
+                "positioning_strength": 50,
+                "max_volume_strike": chain_data.get("max_pain", 0),
+                "max_volume": max(
+                    (c.get("total_volume", 0) for c in chain_data.get("chain", [])),
+                    default=0
+                ),
+                "total_call_oi": chain_data.get("total_call_oi", 0),
+                "total_put_oi": chain_data.get("total_put_oi", 0),
+                "total_call_volume": chain_data.get("total_call_volume", 0),
+                "total_put_volume": chain_data.get("total_put_volume", 0),
+                "supports": chain_data.get("supports", []),
+                "resistances": chain_data.get("resistances", []),
+                "data_source": "deribit",
+            }
+        # Fall through to simulation if Deribit fails
+
+    # ── SIMULATED data path: EURUSD, GBPUSD, XAUUSD (or Deribit fallback) ──
     seed = _get_seed(pair_key)
     np.random.seed(seed)
     random.seed(seed)
 
-    price = float(current_price) if current_price else 1.0
-
-    # Generate option chain
+    # Generate simulated option chain
     chain = _generate_option_chain(pair_key, price)
 
     # Calculate aggregated metrics from the chain
@@ -147,18 +193,13 @@ def get_cme_signal(pair_key, current_price):
     total_call_vol = sum(c["call_volume"] for c in chain)
     total_put_vol = sum(c["put_volume"] for c in chain)
 
-    # Put/Call ratio from total OI
     pc_oi_ratio = total_put_oi / total_call_oi if total_call_oi > 0 else 1.0
     pc_vol_ratio = total_put_vol / total_call_vol if total_call_vol > 0 else 1.0
 
-    # Max pain: strike with highest combined OI (call_oi + put_oi)
     max_pain_strike = max(chain, key=lambda c: c["total_oi"])
     max_pain = max_pain_strike["strike"]
-
-    # Volume profile: find price level with highest volume
     max_vol_strike = max(chain, key=lambda c: c["total_volume"])
 
-    # Find key support/resistance levels
     supports, resistances = _find_key_levels(chain, price)
 
     # Simulated futures positioning
@@ -167,7 +208,7 @@ def get_cme_signal(pair_key, current_price):
     positioning_strength = min(100, abs(net_non_commercial) / 3000)
 
     # Compute score from positioning + options sentiment
-    score = 50  # Start neutral
+    score = 50
     if positioning == "net_long":
         score += 15 * (positioning_strength / 100)
     else:
@@ -179,7 +220,6 @@ def get_cme_signal(pair_key, current_price):
     elif pc_sentiment == "bearish":
         score -= 10
 
-    # Volume confirmation
     volume_sentiment = total_call_vol / (total_call_vol + total_put_vol) * 100 if (total_call_vol + total_put_vol) > 0 else 50
     if volume_sentiment > 60:
         score += 5
@@ -208,17 +248,30 @@ def get_cme_signal(pair_key, current_price):
         "total_put_volume": total_put_vol,
         "supports": supports,
         "resistances": resistances,
+        "data_source": "simulated",
     }
 
 
 def get_cme_levels(pair_key, current_price):
-    """Get detailed CME option chain levels for a pair."""
+    """Get detailed CME option chain levels for a pair.
+    
+    Uses REAL Deribit data for BTC/ETH.
+    Falls back to simulated data for EURUSD, GBPUSD, XAUUSD.
+    """
     price = float(current_price) if current_price else 1.0
+
+    # ── REAL data path: Deribit for BTC/ETH ──
+    if pair_key in _REAL_OPTIONS_PAIRS:
+        real_data = _deribit_chain(pair_key, price)
+        if real_data:
+            real_data["data_source"] = "deribit"
+            return real_data
+
+    # ── SIMULATED data path ──
     chain = _generate_option_chain(pair_key, price)
     supports, resistances = _find_key_levels(chain, price)
     max_pain_strike = max(chain, key=lambda c: c["total_oi"])
 
-    # Aggregated metrics for frontend
     total_call_oi = sum(c["call_oi"] for c in chain)
     total_put_oi = sum(c["put_oi"] for c in chain)
     total_call_vol = sum(c["call_volume"] for c in chain)
@@ -241,6 +294,7 @@ def get_cme_levels(pair_key, current_price):
         "supports": supports,
         "resistances": resistances,
         "chain": chain,
+        "data_source": "simulated",
     }
 
 

@@ -464,11 +464,17 @@ function CMELevelsPanel() {
         const resistances = data.resistances || [];
         const maxPain = data.max_pain;
 
+        const dataSource = data.data_source || 'simulated';
+        const isReal = dataSource === 'deribit';
+
         return h('div', { key: pair, className: 'cme-levels-card' },
           // Header
           h('div', { className: 'cme-levels-header' },
             h('div', {},
               h('span', { style: { fontWeight: 700, fontSize: '1rem' } }, pair),
+              h('span', { style: { fontSize: '0.65rem', marginLeft: '6px' },
+                className: `cme-source-badge ${isReal ? 'real' : 'sim'}`
+              }, isReal ? '🔵 REAL' : '🟡 SIM'),
               h('span', { style: { display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px' } },
                 'Max Pain: ', h('span', { className: 'mono' }, h(FormatPrice, { value: maxPain })),
                 '  |  Current: ', h('span', { className: 'mono' }, h(FormatPrice, { value: current })),
